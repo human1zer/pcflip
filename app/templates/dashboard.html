@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - {{ app_name }}{% endblock %}
+{% block content %}
+
+<h1 class="text-xl font-semibold mb-4">Dashboard</h1>
+
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">In stock</div>
+    <div class="text-2xl font-bold mt-1">{{ stats.in_stock_count }}</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">Sold</div>
+    <div class="text-2xl font-bold mt-1">{{ stats.sold_count }}</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">Invested</div>
+    <div class="text-2xl font-bold mt-1">{{ "%.0f"|format(stats.total_invested) }} kr</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">Profit</div>
+    <div class="text-2xl font-bold mt-1 {% if stats.total_profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
+      {{ "%.0f"|format(stats.total_profit) }} kr
+    </div>
+  </div>
+</div>
+
+<div class="flex items-center justify-between mb-3">
+  <h2 class="text-lg font-semibold">Currently in stock</h2>
+  <a href="/items?status=in_stock" class="text-accent text-sm">View all &rarr;</a>
+</div>
+
+{% if in_stock_items %}
+<div class="space-y-2 mb-8">
+  {% for item in in_stock_items %}
+  <a href="/items/{{ item.id }}" class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
+    <div class="flex justify-between items-center">
+      <div>
+        <div class="font-medium">{{ item.title }}</div>
+        <div class="text-xs text-slate-400">{{ item.category or "Uncategorized" }} · Bought for {{ "%.0f"|format(item.purchase_price or 0) }} kr</div>
+      </div>
+      <span class="text-xs px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">{{ item.status_label }}</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-slate-500 mb-8">No items in stock right now.</p>
+{% endif %}
+
+<div class="flex items-center justify-between mb-3">
+  <h2 class="text-lg font-semibold">Recent sales</h2>
+  <a href="/items?status=sold" class="text-accent text-sm">View all &rarr;</a>
+</div>
+
+{% if recent_sales %}
+<div class="space-y-2">
+  {% for item in recent_sales %}
+  <a href="/items/{{ item.id }}" class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
+    <div class="flex justify-between items-center">
+      <div>
+        <div class="font-medium">{{ item.title }}</div>
+        <div class="text-xs text-slate-400">Sold {{ item.sale_date or "" }} to {{ item.buyer_name or "?" }}</div>
+      </div>
+      <div class="text-right">
+        <div class="font-semibold {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
+          {{ "%+.0f"|format(item.profit) }} kr
+        </div>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-slate-500">No sales recorded yet.</p>
+{% endif %}
+
+{% endblock %}

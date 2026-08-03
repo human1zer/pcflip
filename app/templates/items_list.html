@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Items - {{ app_name }}{% endblock %}
+{% block content %}
+
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-xl font-semibold">Items</h1>
+  <a href="/export.csv" class="text-sm text-slate-400 hover:text-accent border border-slate-700 rounded-lg px-3 py-1.5">Export CSV</a>
+</div>
+
+<form method="get" action="/items" class="mb-4">
+  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+  <div class="flex gap-2">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search title, serial, seller, buyer..."
+      class="flex-1 bg-card border border-slate-700 rounded-lg px-3 py-2 text-sm">
+    <button type="submit" class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm">Search</button>
+    {% if q %}<a href="/items{% if status %}?status={{ status }}{% endif %}" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400">Clear</a>{% endif %}
+  </div>
+</form>
+
+<div class="flex gap-2 mb-4 overflow-x-auto text-sm">
+  <a href="/items{% if q %}?q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if not status %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">All</a>
+  <a href="/items?status=in_stock{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='in_stock' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">In stock</a>
+  <a href="/items?status=listed{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='listed' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Listed</a>
+  <a href="/items?status=sold{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='sold' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Sold</a>
+</div>
+
+{% if q %}<p class="text-sm text-slate-400 mb-3">Search results for "{{ q }}"</p>{% endif %}
+
+{% if items %}
+<div class="space-y-2">
+  {% for item in items %}
+  <a href="/items/{{ item.id }}" class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
+    <div class="flex justify-between items-start gap-3">
+      {% if item.cover_photo %}
+      <img src="/photos/{{ item.cover_photo }}" loading="lazy" class="w-14 h-14 object-cover rounded-lg border border-slate-800 shrink-0">
+      {% else %}
+      <div class="w-14 h-14 rounded-lg bg-slate-800 shrink-0"></div>
+      {% endif %}
+      <div class="min-w-0 flex-1">
+        <div class="font-medium truncate">{{ item.title }}</div>
+        <div class="text-xs text-slate-400 truncate">
+          {{ item.category or "Uncategorized" }}
+          {% if item.serial_number %} · SN: {{ item.serial_number }}{% endif %}
+        </div>
+        <div class="text-xs text-slate-500 mt-1">Bought from {{ item.seller_name or "?" }} for {{ "%.0f"|format(item.purchase_price or 0) }} kr</div>
+      </div>
+      <div class="text-right shrink-0">
+        <span class="text-xs px-2 py-1 rounded
+          {% if item.status == 'sold' %}bg-accent/10 text-accent border border-accent/30
+          {% elif item.status == 'listed' %}bg-sky-500/10 text-sky-400 border border-sky-500/30
+          {% else %}bg-amber-500/10 text-amber-400 border border-amber-500/30{% endif %}">
+          {{ item.status_label }}
+        </span>
+        {% if item.status == 'sold' %}
+        <div class="text-xs mt-1 {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</div>
+        {% endif %}
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-slate-500">No items found.</p>
+{% endif %}
+
+{% endblock %}

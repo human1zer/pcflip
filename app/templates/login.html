@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in - {{ app_name }}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          accent: { DEFAULT: '{{ accent }}', hover: '{{ accent_hover }}' },
+          page: '{{ bg_color }}',
+          card: '{{ card_color }}',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { -webkit-tap-highlight-color: transparent; }
+  input { font-size: 16px; }
+</style>
+</head>
+<body class="bg-page text-slate-100 min-h-screen flex items-center justify-center px-4">
+
+<div class="w-full max-w-sm">
+  <h1 class="text-xl font-bold text-accent mb-1 text-center">{{ app_name }}</h1>
+  <p class="text-sm text-slate-500 mb-6 text-center">{{ app_tagline }}</p>
+
+  {% if error %}
+  <div class="mb-4 bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
+  {% endif %}
+
+  <form method="post" action="/login" class="bg-card border border-slate-800 rounded-xl p-5 space-y-4">
+    <input type="hidden" name="next" value="{{ next or '/' }}">
+    <div>
+      <label class="block text-sm text-slate-400 mb-1">Username</label>
+      <input name="username" autocomplete="username" required autofocus
+        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+    </div>
+    <div>
+      <label class="block text-sm text-slate-400 mb-1">Password</label>
+      <input name="password" type="password" autocomplete="current-password" required
+        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+    </div>
+    <button type="submit" class="w-full bg-accent hover:opacity-90 text-slate-950 font-semibold py-3 rounded-lg">
+      Log in
+    </button>
+  </form>
+</div>
+
+</body>
+</html>

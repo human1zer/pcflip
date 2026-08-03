@@ -1,0 +1,12 @@
+services:
+  pcflip:
+    build: .
+    container_name: pcflip
+    restart: unless-stopped
+    ports:
+      - "8420:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/pcflip.db
+      - COOKIE_SECURE=false

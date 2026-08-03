@@ -1,0 +1,22 @@
+# Database
+data/pcflip.db
+*.db
+*.sqlite3
+
+# User uploaded content
+data/photos/
+data/attachments/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Env / secrets
+.env
+*.env
+
+# OS junk
+.DS_Store

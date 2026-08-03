@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title }} - {{ app_name }}{% endblock %}
+{% block content %}
+
+<div class="flex items-start justify-between mb-4 gap-3">
+  <div>
+    <h1 class="text-xl font-semibold">{{ item.title }}</h1>
+    <div class="text-sm text-slate-400">{{ item.category or "Uncategorized" }}{% if item.serial_number %} · SN: {{ item.serial_number }}{% endif %}</div>
+  </div>
+  <span class="text-xs px-2 py-1 rounded shrink-0
+    {% if item.status == 'sold' %}bg-accent/10 text-accent border border-accent/30
+    {% elif item.status == 'listed' %}bg-sky-500/10 text-sky-400 border border-sky-500/30
+    {% else %}bg-amber-500/10 text-amber-400 border border-amber-500/30{% endif %}">
+    {{ item.status_label }}
+  </span>
+</div>
+
+{% if item.status == 'sold' %}
+<div class="bg-card border border-slate-800 rounded-xl p-4 mb-4 flex justify-between items-center">
+  <span class="text-slate-400 text-sm">Profit</span>
+  <span class="text-xl font-bold {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</span>
+</div>
+{% endif %}
+
+<div class="grid sm:grid-cols-2 gap-4 mb-4">
+  <section class="bg-card border border-slate-800 rounded-xl p-4">
+    <h2 class="font-semibold text-amber-400 text-sm uppercase tracking-wide mb-3">Purchase</h2>
+    <dl class="space-y-2 text-sm">
+      <div class="flex justify-between"><dt class="text-slate-400">Seller</dt><dd>{{ item.seller_name or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Contact</dt><dd>{{ item.seller_contact or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Price</dt><dd>{{ "%.0f"|format(item.purchase_price) if item.purchase_price else "-" }} kr</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Date</dt><dd>{{ item.purchase_date or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Payment</dt><dd>{{ item.purchase_method or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Delivery</dt><dd>{{ item.purchase_delivery or "-" }}</dd></div>
+      {% if item.purchase_delivery == "Shipped" %}
+      <div class="flex justify-between"><dt class="text-slate-400">Shipping co.</dt><dd>{{ item.purchase_shipping_company or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Tracking</dt><dd>{{ item.purchase_tracking or "-" }}</dd></div>
+      {% endif %}
+    </dl>
+  </section>
+
+  <section class="bg-card border border-slate-800 rounded-xl p-4">
+    <h2 class="font-semibold text-sky-400 text-sm uppercase tracking-wide mb-3">Sale</h2>
+    {% if item.status == 'sold' or item.buyer_name or item.sale_price %}
+    <dl class="space-y-2 text-sm">
+      <div class="flex justify-between"><dt class="text-slate-400">Buyer</dt><dd>{{ item.buyer_name or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Contact</dt><dd>{{ item.buyer_contact or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Price</dt><dd>{{ "%.0f"|format(item.sale_price) if item.sale_price else "-" }} kr</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Date</dt><dd>{{ item.sale_date or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Payment</dt><dd>{{ item.sale_method or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Delivery</dt><dd>{{ item.sale_delivery or "-" }}</dd></div>
+      {% if item.sale_delivery == "Shipped" %}
+      <div class="flex justify-between"><dt class="text-slate-400">Shipping co.</dt><dd>{{ item.sale_shipping_company or "-" }}</dd></div>
+      <div class="flex justify-between"><dt class="text-slate-400">Tracking</dt><dd>{{ item.sale_tracking or "-" }}</dd></div>
+      {% endif %}
+    </dl>
+    {% else %}
+    <p class="text-slate-500 text-sm">Not sold yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if item.notes %}
+<section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-2">Notes</h2>
+  <p class="text-sm whitespace-pre-wrap">{{ item.notes }}</p>
+</section>
+{% endif %}
+
+<section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-3">Photos {% if photos %}({{ photos|length }}){% endif %}</h2>
+
+  {% if photos %}
+  <div class="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-4">
+    {% for p in photos %}
+    <div class="relative group">
+      <a href="/photos/{{ p.filename }}" target="_blank">
+        <img src="/photos/{{ p.thumb_filename }}" loading="lazy" class="w-full aspect-square object-cover rounded-lg border border-slate-800">
+      </a>
+      <form method="post" action="/items/{{ item.id }}/photos/{{ p.id }}/delete" onsubmit="return confirm('Delete this photo?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="absolute top-1 right-1 bg-page/80 text-red-400 rounded-full w-6 h-6 flex items-center justify-center text-sm leading-none">&times;</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm mb-4">No photos yet.</p>
+  {% endif %}
+
+  <form method="post" action="/items/{{ item.id }}/photos" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="block text-sm text-slate-400 mb-2">Add photos (you can select multiple at once)</label>
+    <div class="flex gap-2">
+      <input type="file" name="files" accept="image/*" multiple capture="environment"
+        class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
+      <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
+    </div>
+  </form>
+</section>
+
+<section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-3">Receipts {% if attachments %}({{ attachments|length }}){% endif %}</h2>
+  <p class="text-xs text-slate-500 mb-3">Seller receipts or proof of purchase — PDF or photo, either works.</p>
+
+  {% if attachments %}
+  <div class="space-y-2 mb-4">
+    {% for a in attachments %}
+    <div class="flex items-center gap-3 bg-slate-800/50 border border-slate-800 rounded-lg p-2">
+      {% if a.file_type == 'image' %}
+      <a href="/attachments/{{ a.filename }}" target="_blank" class="shrink-0">
+        <img src="/attachments/{{ a.filename }}" loading="lazy" class="w-12 h-12 object-cover rounded border border-slate-800">
+      </a>
+      {% else %}
+      <a href="/attachments/{{ a.filename }}" target="_blank" class="shrink-0 w-12 h-12 rounded bg-slate-800 flex items-center justify-center text-xl">📄</a>
+      {% endif %}
+      <a href="/attachments/{{ a.filename }}" target="_blank" class="flex-1 min-w-0 text-sm truncate hover:text-accent">{{ a.original_name or a.filename }}</a>
+      <form method="post" action="/items/{{ item.id }}/attachments/{{ a.id }}/delete" onsubmit="return confirm('Delete this receipt?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="text-red-400 text-sm px-2">&times;</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm mb-4">No receipts uploaded yet.</p>
+  {% endif %}
+
+  <form method="post" action="/items/{{ item.id }}/attachments" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="block text-sm text-slate-400 mb-2">Add receipt (PDF or photo)</label>
+    <div class="flex gap-2">
+      <input type="file" name="files" accept="image/*,application/pdf" multiple
+        class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
+      <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
+    </div>
+  </form>
+</section>
+
+<div class="flex gap-3">
+  <a href="/items/{{ item.id }}/edit" class="flex-1 text-center bg-slate-800 hover:bg-slate-700 py-3 rounded-lg font-medium">Edit</a>
+  <form method="post" action="/items/{{ item.id }}/delete" onsubmit="return confirm('Delete this item and all its photos permanently?');" class="flex-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="w-full bg-red-500/10 border border-red-500/30 text-red-400 py-3 rounded-lg font-medium">Delete</button>
+  </form>
+</div>
+
+{% endblock %}
