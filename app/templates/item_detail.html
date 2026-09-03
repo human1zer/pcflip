@@ -91,7 +91,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="block text-sm text-slate-400 mb-2">Add photos (you can select multiple at once)</label>
     <div class="flex gap-2">
-      <input type="file" name="files" accept="image/*" multiple capture="environment"
+      <input type="file" name="files" accept="image/*,.avif" multiple capture="environment"
         class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
       <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
     </div>
@@ -129,7 +129,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="block text-sm text-slate-400 mb-2">Add receipt (PDF or photo)</label>
     <div class="flex gap-2">
-      <input type="file" name="files" accept="image/*,application/pdf" multiple
+      <input type="file" name="files" accept="image/*,.avif,application/pdf" multiple
         class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
       <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
     </div>

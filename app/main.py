@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from typing import List
 from PIL import Image, UnidentifiedImageError
+import pillow_avif  # noqa: F401 -- registers the AVIF decoder with Pillow on import
 import csv
 import io
 import sqlite3
@@ -178,7 +179,7 @@ def save_attachment(item_id: int, upload: UploadFile) -> None:
     content_type = (upload.content_type or "").lower()
     name_lower = (upload.filename or "").lower()
     is_pdf = content_type == "application/pdf" or name_lower.endswith(".pdf")
-    is_image = content_type.startswith("image/") or name_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".heic"))
+    is_image = content_type.startswith("image/") or name_lower.endswith((".jpg", ".jpeg", ".png", ".webp", ".heic", ".avif"))
 
     if not (is_pdf or is_image):
         return
