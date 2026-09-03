@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS items (
     sale_method TEXT,
     sale_delivery TEXT,
     sale_shipping_company TEXT,
-    sale_tracking TEXT
+    sale_tracking TEXT,
+
+    batch_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_items_status ON items(status);
@@ -68,6 +70,21 @@ def init_db():
     os.makedirs(ATTACHMENTS_DIR, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """Add columns to a pre-existing DB that predates them. ADD COLUMN is
+    metadata-only in SQLite -- it never rewrites existing rows.
+    The batch_id index is created here (not in SCHEMA) because on an
+    existing DB, CREATE TABLE IF NOT EXISTS is a no-op -- an index on
+    batch_id in SCHEMA would run before ALTER TABLE adds the column and
+    fail with "no such column". Runs unconditionally, after the column is
+    guaranteed to exist either way, so fresh installs get the index too."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
+    if "batch_id" not in cols:
+        conn.execute("ALTER TABLE items ADD COLUMN batch_id TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_batch ON items(batch_id)")
 
 
 @contextmanager

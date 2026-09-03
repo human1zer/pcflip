@@ -112,6 +112,16 @@ def row_to_dict(row):
     return d
 
 
+def _batch_sibling_ids(conn, item_id: int) -> list[int]:
+    """All item ids that share item_id's batch (including item_id itself),
+    or just [item_id] if it isn't part of a batch."""
+    row = conn.execute("SELECT batch_id FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not row or not row["batch_id"]:
+        return [item_id]
+    rows = conn.execute("SELECT id FROM items WHERE batch_id = ?", (row["batch_id"],)).fetchall()
+    return [r["id"] for r in rows]
+
+
 def get_photos(conn, item_id):
     rows = conn.execute(
         "SELECT * FROM item_photos WHERE item_id = ? ORDER BY sort_order, id", (item_id,)
@@ -146,13 +156,14 @@ def save_photo(item_id: int, upload: UploadFile) -> None:
     thumb.save(os.path.join(item_dir, thumb_filename), "JPEG", quality=80)
 
     with database.get_conn() as conn:
-        max_order = conn.execute(
-            "SELECT COALESCE(MAX(sort_order), -1) FROM item_photos WHERE item_id = ?", (item_id,)
-        ).fetchone()[0]
-        conn.execute(
-            "INSERT INTO item_photos (item_id, filename, thumb_filename, sort_order) VALUES (?, ?, ?, ?)",
-            (item_id, f"{item_id}/{filename}", f"{item_id}/{thumb_filename}", max_order + 1),
-        )
+        for iid in _batch_sibling_ids(conn, item_id):
+            max_order = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM item_photos WHERE item_id = ?", (iid,)
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO item_photos (item_id, filename, thumb_filename, sort_order) VALUES (?, ?, ?, ?)",
+                (iid, f"{item_id}/{filename}", f"{item_id}/{thumb_filename}", max_order + 1),
+            )
 
 
 def get_attachments(conn, item_id):
@@ -196,10 +207,11 @@ def save_attachment(item_id: int, upload: UploadFile) -> None:
         file_type = "image"
 
     with database.get_conn() as conn:
-        conn.execute(
-            "INSERT INTO item_attachments (item_id, filename, original_name, file_type) VALUES (?, ?, ?, ?)",
-            (item_id, f"{item_id}/{filename}", upload.filename, file_type),
-        )
+        for iid in _batch_sibling_ids(conn, item_id):
+            conn.execute(
+                "INSERT INTO item_attachments (item_id, filename, original_name, file_type) VALUES (?, ?, ?, ?)",
+                (iid, f"{item_id}/{filename}", upload.filename, file_type),
+            )
 
 
 FORM_FIELDS = [
@@ -295,6 +307,22 @@ def _parse_item_form(form) -> tuple[dict | None, str | None]:
     return values, None
 
 
+MAX_BATCH_QUANTITY = 500
+
+
+def _split_purchase_price(total: float | None, quantity: int) -> list[float | None]:
+    """Split a total across `quantity` units so they sum exactly to `total`,
+    using integer cents so floating point can't leave a stray fraction. The
+    last unit absorbs whatever the split doesn't divide evenly."""
+    if total is None:
+        return [None] * quantity
+    total_cents = round(total * 100)
+    base_cents = total_cents // quantity
+    remainder_cents = total_cents - base_cents * quantity
+    prices_cents = [base_cents] * (quantity - 1) + [base_cents + remainder_cents]
+    return [c / 100 for c in prices_cents]
+
+
 @app.post("/items/new")
 async def item_create(request: Request):
     form = await request.form()
@@ -305,17 +333,51 @@ async def item_create(request: Request):
     if error:
         return render(request, "item_form.html", item=dict(form), error=error, status_code=400, **FORM_TEMPLATE_CTX)
 
-    cols = ", ".join(values.keys())
-    placeholders = ", ".join("?" for _ in values)
+    quantity_raw = form.get("quantity") or "1"
     try:
-        with database.get_conn() as conn:
-            cur = conn.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(values.values()))
-            new_id = cur.lastrowid
-    except sqlite3.IntegrityError:
-        return render(request, "item_form.html", item=dict(form), error="Couldn't save item — check the required fields.",
+        quantity = int(quantity_raw)
+    except ValueError:
+        return render(request, "item_form.html", item=dict(form), error="Quantity must be a whole number.",
+                      status_code=400, **FORM_TEMPLATE_CTX)
+    if quantity < 1 or quantity > MAX_BATCH_QUANTITY:
+        return render(request, "item_form.html", item=dict(form),
+                      error=f"Quantity must be between 1 and {MAX_BATCH_QUANTITY}.",
                       status_code=400, **FORM_TEMPLATE_CTX)
 
-    return RedirectResponse(f"/items/{new_id}", status_code=303)
+    if quantity == 1:
+        cols = ", ".join(values.keys())
+        placeholders = ", ".join("?" for _ in values)
+        try:
+            with database.get_conn() as conn:
+                cur = conn.execute(f"INSERT INTO items ({cols}) VALUES ({placeholders})", list(values.values()))
+                new_id = cur.lastrowid
+        except sqlite3.IntegrityError:
+            return render(request, "item_form.html", item=dict(form), error="Couldn't save item — check the required fields.",
+                          status_code=400, **FORM_TEMPLATE_CTX)
+        return RedirectResponse(f"/items/{new_id}", status_code=303)
+
+    batch_id = uuid.uuid4().hex
+    base_title = (values["title"] or "").strip()
+    unit_prices = _split_purchase_price(values["purchase_price"], quantity)
+
+    cols = list(values.keys()) + ["batch_id"]
+    placeholders = ", ".join("?" for _ in cols)
+    try:
+        with database.get_conn() as conn:
+            first_id = None
+            for n in range(1, quantity + 1):
+                unit_values = dict(values)
+                unit_values["title"] = f"{base_title} ({n}/{quantity})"
+                unit_values["purchase_price"] = unit_prices[n - 1]
+                row = list(unit_values.values()) + [batch_id]
+                cur = conn.execute(f"INSERT INTO items ({', '.join(cols)}) VALUES ({placeholders})", row)
+                if first_id is None:
+                    first_id = cur.lastrowid
+    except sqlite3.IntegrityError:
+        return render(request, "item_form.html", item=dict(form), error="Couldn't save items — check the required fields.",
+                      status_code=400, **FORM_TEMPLATE_CTX)
+
+    return RedirectResponse(f"/items/{first_id}", status_code=303)
 
 
 @app.get("/items/{item_id}")
@@ -386,11 +448,16 @@ async def delete_photo(request: Request, item_id: int, photo_id: int):
     with database.get_conn() as conn:
         photo = conn.execute("SELECT * FROM item_photos WHERE id = ? AND item_id = ?", (photo_id, item_id)).fetchone()
         if photo:
-            for fname in (photo["filename"], photo["thumb_filename"]):
-                path = os.path.join(database.PHOTOS_DIR, fname)
-                if os.path.exists(path):
-                    os.remove(path)
             conn.execute("DELETE FROM item_photos WHERE id = ?", (photo_id,))
+            for fname in (photo["filename"], photo["thumb_filename"]):
+                still_used = conn.execute(
+                    "SELECT 1 FROM item_photos WHERE filename = ? OR thumb_filename = ? LIMIT 1",
+                    (fname, fname),
+                ).fetchone()
+                if not still_used:
+                    path = os.path.join(database.PHOTOS_DIR, fname)
+                    if os.path.exists(path):
+                        os.remove(path)
     return RedirectResponse(f"/items/{item_id}", status_code=303)
 
 
@@ -415,10 +482,14 @@ async def delete_attachment(request: Request, item_id: int, attachment_id: int):
             "SELECT * FROM item_attachments WHERE id = ? AND item_id = ?", (attachment_id, item_id)
         ).fetchone()
         if att:
-            path = os.path.join(database.ATTACHMENTS_DIR, att["filename"])
-            if os.path.exists(path):
-                os.remove(path)
             conn.execute("DELETE FROM item_attachments WHERE id = ?", (attachment_id,))
+            still_used = conn.execute(
+                "SELECT 1 FROM item_attachments WHERE filename = ? LIMIT 1", (att["filename"],)
+            ).fetchone()
+            if not still_used:
+                path = os.path.join(database.ATTACHMENTS_DIR, att["filename"])
+                if os.path.exists(path):
+                    os.remove(path)
     return RedirectResponse(f"/items/{item_id}", status_code=303)
 
 
@@ -428,10 +499,35 @@ async def item_delete(request: Request, item_id: int):
     if not auth.check_csrf(request, form):
         return RedirectResponse("/login", status_code=303)
     with database.get_conn() as conn:
+        photos = get_photos(conn, item_id)
+        attachments = get_attachments(conn, item_id)
+        # Cascades away this item's own item_photos/item_attachments rows,
+        # but leaves any sibling batch items' rows (and their files) intact.
         conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+
+        for photo in photos:
+            for fname in (photo["filename"], photo["thumb_filename"]):
+                still_used = conn.execute(
+                    "SELECT 1 FROM item_photos WHERE filename = ? OR thumb_filename = ? LIMIT 1",
+                    (fname, fname),
+                ).fetchone()
+                if not still_used:
+                    path = os.path.join(database.PHOTOS_DIR, fname)
+                    if os.path.exists(path):
+                        os.remove(path)
+
+        for att in attachments:
+            still_used = conn.execute(
+                "SELECT 1 FROM item_attachments WHERE filename = ? LIMIT 1", (att["filename"],)
+            ).fetchone()
+            if not still_used:
+                path = os.path.join(database.ATTACHMENTS_DIR, att["filename"])
+                if os.path.exists(path):
+                    os.remove(path)
+
     for base_dir in (database.PHOTOS_DIR, database.ATTACHMENTS_DIR):
         item_dir = os.path.join(base_dir, str(item_id))
-        if os.path.isdir(item_dir):
+        if os.path.isdir(item_dir) and not os.listdir(item_dir):
             shutil.rmtree(item_dir, ignore_errors=True)
     return RedirectResponse("/items", status_code=303)
 
