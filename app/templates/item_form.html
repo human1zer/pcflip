@@ -8,6 +8,9 @@
 <div class="mb-4 bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
 {% endif %}
 
+{# Keep this action explicit -- without one the form posts to the current
+   URL, which breaks after the FINN-import endpoint re-renders this same
+   form in place at its own /items/import/finn URL. See CLAUDE.md. #}
 <form method="post" action="{{ ('/items/' ~ item.id ~ '/edit') if is_edit else '/items/new' }}" class="flex flex-col gap-6">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="finn_image_url" value="{{ item.finn_image_url if item and item.finn_image_url else '' }}">
