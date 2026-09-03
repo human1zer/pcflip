@@ -1,15 +1,41 @@
 {% extends "base.html" %}
-{% block title %}{{ "Edit" if item else "New" }} Item - {{ app_name }}{% endblock %}
+{% block title %}{{ "Edit" if is_edit else "New" }} Item - {{ app_name }}{% endblock %}
 {% block content %}
 
-<h1 class="text-xl font-semibold mb-4">{{ "Edit item" if item else "New item" }}</h1>
+<h1 class="text-xl font-semibold mb-4">{{ "Edit item" if is_edit else "New item" }}</h1>
 
 {% if error %}
 <div class="mb-4 bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
 {% endif %}
 
-<form method="post" class="space-y-6">
+<form method="post" action="{{ ('/items/' ~ item.id ~ '/edit') if is_edit else '/items/new' }}" class="flex flex-col gap-6">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="finn_image_url" value="{{ item.finn_image_url if item and item.finn_image_url else '' }}">
+
+  <div class="order-last flex gap-3">
+    <button type="submit" class="flex-1 bg-accent hover:opacity-90 text-slate-950 font-semibold py-3 rounded-lg">
+      {{ "Save changes" if is_edit else "Add item" }}
+    </button>
+    <a href="{{ '/items/' ~ item.id if item and item.id else '/items' }}" class="px-4 py-3 rounded-lg border border-slate-700 text-slate-300">Cancel</a>
+  </div>
+
+  {% if not is_edit %}
+  <section class="bg-card border border-slate-800 rounded-xl p-4 space-y-3">
+    <h2 class="font-semibold text-accent text-sm uppercase tracking-wide">Import from FINN</h2>
+    <div class="flex gap-2">
+      <input name="finn_input" placeholder="FINN-kode or finn.no link" value="{{ item.finn_input if item else '' }}"
+        class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+      <button type="submit" formaction="/items/import/finn" formnovalidate
+        class="bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold px-4 rounded-lg whitespace-nowrap">Fetch from FINN</button>
+    </div>
+    {% if item and item.finn_image_url %}
+    <div class="flex items-center gap-3">
+      <img src="{{ item.finn_image_url }}" class="w-16 h-16 object-cover rounded-lg border border-slate-800">
+      <p class="text-xs text-slate-500">Photo will be attached when you save.</p>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section class="bg-card border border-slate-800 rounded-xl p-4 space-y-3">
     <h2 class="font-semibold text-accent text-sm uppercase tracking-wide">Item</h2>
@@ -85,10 +111,10 @@
       </div>
     </div>
 
-    {% if not item %}
+    {% if not is_edit %}
     <div>
       <label class="block text-sm text-slate-400 mb-1">Quantity</label>
-      <input name="quantity" type="number" min="1" step="1" value="1"
+      <input name="quantity" type="number" min="1" step="1" value="{{ item.quantity if item and item.quantity else 1 }}"
         class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
       <p class="text-xs text-slate-500 mt-1">More than 1: buying identical units in one transaction.
         Creates one row per unit, splits the purchase price evenly, and appends "(n/total)" to the title.</p>
@@ -197,13 +223,6 @@
     <label class="block text-sm text-slate-400 mb-1">Notes</label>
     <textarea name="notes" rows="3" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">{{ item.notes if item else '' }}</textarea>
   </section>
-
-  <div class="flex gap-3">
-    <button type="submit" class="flex-1 bg-accent hover:opacity-90 text-slate-950 font-semibold py-3 rounded-lg">
-      {{ "Save changes" if item else "Add item" }}
-    </button>
-    <a href="{{ '/items/' ~ item.id if item and item.id else '/items' }}" class="px-4 py-3 rounded-lg border border-slate-700 text-slate-300">Cancel</a>
-  </div>
 </form>
 
 {% endblock %}

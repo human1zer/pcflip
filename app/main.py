@@ -12,8 +12,9 @@ import pillow_avif  # noqa: F401 -- registers the AVIF decoder with Pillow on im
 import csv
 import io
 import sqlite3
+import requests
 
-from . import database, config, auth
+from . import database, config, auth, finn_import
 from .constants import (
     CATEGORIES, CONDITIONS, STATUSES, STATUS_LABELS,
     PAYMENT_METHODS, DELIVERY_METHODS,
@@ -167,6 +168,24 @@ def save_photo(item_id: int, upload: UploadFile) -> None:
             )
 
 
+class _DownloadedFile:
+    """Duck-types the one attribute save_photo() actually uses off UploadFile."""
+
+    def __init__(self, file_obj):
+        self.file = file_obj
+
+
+def _attach_photo_from_url(item_id: int, url: str) -> None:
+    """Best-effort: a broken image URL or network hiccup here must never
+    block item creation, so failures are swallowed."""
+    try:
+        resp = requests.get(url, headers=finn_import.FINN_HEADERS, timeout=finn_import.FETCH_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+    except requests.RequestException:
+        return
+    save_photo(item_id, _DownloadedFile(io.BytesIO(resp.content)))
+
+
 def get_attachments(conn, item_id):
     rows = conn.execute(
         "SELECT * FROM item_attachments WHERE item_id = ? ORDER BY id", (item_id,)
@@ -285,7 +304,7 @@ FORM_TEMPLATE_CTX = dict(
 
 @app.get("/items/new")
 def item_new_form(request: Request):
-    return render(request, "item_form.html", item=None, error=None, **FORM_TEMPLATE_CTX)
+    return render(request, "item_form.html", item=None, error=None, is_edit=False, **FORM_TEMPLATE_CTX)
 
 
 def _parse_item_form(form) -> tuple[dict | None, str | None]:
@@ -332,18 +351,21 @@ async def item_create(request: Request):
 
     values, error = _parse_item_form(form)
     if error:
-        return render(request, "item_form.html", item=dict(form), error=error, status_code=400, **FORM_TEMPLATE_CTX)
+        return render(request, "item_form.html", item=dict(form), error=error, is_edit=False,
+                      status_code=400, **FORM_TEMPLATE_CTX)
 
     quantity_raw = form.get("quantity") or "1"
     try:
         quantity = int(quantity_raw)
     except ValueError:
         return render(request, "item_form.html", item=dict(form), error="Quantity must be a whole number.",
-                      status_code=400, **FORM_TEMPLATE_CTX)
+                      is_edit=False, status_code=400, **FORM_TEMPLATE_CTX)
     if quantity < 1 or quantity > MAX_BATCH_QUANTITY:
         return render(request, "item_form.html", item=dict(form),
                       error=f"Quantity must be between 1 and {MAX_BATCH_QUANTITY}.",
-                      status_code=400, **FORM_TEMPLATE_CTX)
+                      is_edit=False, status_code=400, **FORM_TEMPLATE_CTX)
+
+    finn_image_url = form.get("finn_image_url") or None
 
     if quantity == 1:
         cols = ", ".join(values.keys())
@@ -354,7 +376,9 @@ async def item_create(request: Request):
                 new_id = cur.lastrowid
         except sqlite3.IntegrityError:
             return render(request, "item_form.html", item=dict(form), error="Couldn't save item — check the required fields.",
-                          status_code=400, **FORM_TEMPLATE_CTX)
+                          is_edit=False, status_code=400, **FORM_TEMPLATE_CTX)
+        if finn_image_url:
+            _attach_photo_from_url(new_id, finn_image_url)
         return RedirectResponse(f"/items/{new_id}", status_code=303)
 
     batch_id = uuid.uuid4().hex
@@ -376,9 +400,50 @@ async def item_create(request: Request):
                     first_id = cur.lastrowid
     except sqlite3.IntegrityError:
         return render(request, "item_form.html", item=dict(form), error="Couldn't save items — check the required fields.",
-                      status_code=400, **FORM_TEMPLATE_CTX)
+                      is_edit=False, status_code=400, **FORM_TEMPLATE_CTX)
+
+    if finn_image_url:
+        # save_photo() fans a photo out to every batch sibling already, so
+        # attaching it once to the first unit covers the whole batch.
+        _attach_photo_from_url(first_id, finn_image_url)
 
     return RedirectResponse(f"/items/{first_id}", status_code=303)
+
+
+@app.post("/items/import/finn")
+async def item_import_finn(request: Request):
+    """Prefills the new-item form from a FINN.no listing. Re-renders the
+    same form either way -- on failure the user still has everything they'd
+    already typed, and can just fill it in by hand."""
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+
+    base_item = dict(form)
+    finnkode = finn_import.extract_finnkode(form.get("finn_input") or "")
+    if not finnkode:
+        return render(request, "item_form.html", item=base_item, is_edit=False,
+                      error="Couldn't find a FINN-kode in that.", status_code=400, **FORM_TEMPLATE_CTX)
+
+    try:
+        listing = finn_import.fetch_listing(finnkode)
+    except finn_import.FinnImportError as e:
+        return render(request, "item_form.html", item=base_item, is_edit=False,
+                      error=f"FINN import failed ({e}) — fill the form in manually.",
+                      status_code=200, **FORM_TEMPLATE_CTX)
+
+    merged = dict(base_item)
+    merged["title"] = listing["title"]
+    merged["purchase_tracking"] = listing["finnkode"]
+    existing_notes = (base_item.get("notes") or "").strip()
+    merged["notes"] = f"{existing_notes}\n\n--- Imported from FINN ---\n\n{listing['notes']}" if existing_notes else listing["notes"]
+    if listing["condition"]:
+        merged["condition"] = listing["condition"]
+    if listing["category"]:
+        merged["category"] = listing["category"]
+    merged["finn_image_url"] = listing["image_url"] or ""
+
+    return render(request, "item_form.html", item=merged, is_edit=False, error=None, **FORM_TEMPLATE_CTX)
 
 
 @app.get("/items/{item_id}")
@@ -400,7 +465,7 @@ def item_edit_form(request: Request, item_id: int):
     if row is None:
         return RedirectResponse("/items", status_code=303)
     item = row_to_dict(row)
-    return render(request, "item_form.html", item=item, error=None, **FORM_TEMPLATE_CTX)
+    return render(request, "item_form.html", item=item, error=None, is_edit=True, **FORM_TEMPLATE_CTX)
 
 
 @app.post("/items/{item_id}/edit")
@@ -414,7 +479,8 @@ async def item_update(request: Request, item_id: int):
         # Keep the item_id so "Cancel" and the form action still work.
         bad_item = dict(form)
         bad_item["id"] = item_id
-        return render(request, "item_form.html", item=bad_item, error=error, status_code=400, **FORM_TEMPLATE_CTX)
+        return render(request, "item_form.html", item=bad_item, error=error, is_edit=True,
+                      status_code=400, **FORM_TEMPLATE_CTX)
 
     set_clause = ", ".join(f"{k} = ?" for k in values.keys())
     try:
@@ -424,7 +490,7 @@ async def item_update(request: Request, item_id: int):
         bad_item = dict(form)
         bad_item["id"] = item_id
         return render(request, "item_form.html", item=bad_item,
-                      error="Couldn't save item — check the required fields.",
+                      error="Couldn't save item — check the required fields.", is_edit=True,
                       status_code=400, **FORM_TEMPLATE_CTX)
 
     return RedirectResponse(f"/items/{item_id}", status_code=303)
