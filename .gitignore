@@ -20,3 +20,4 @@ venv/
 
 # OS junk
 .DS_Store
+backup.log

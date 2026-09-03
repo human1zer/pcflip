@@ -34,8 +34,8 @@
       <div class="flex justify-between"><dt class="text-slate-400">Delivery</dt><dd>{{ item.purchase_delivery or "-" }}</dd></div>
       {% if item.purchase_delivery == "Shipped" %}
       <div class="flex justify-between"><dt class="text-slate-400">Shipping co.</dt><dd>{{ item.purchase_shipping_company or "-" }}</dd></div>
-      <div class="flex justify-between"><dt class="text-slate-400">Tracking</dt><dd>{{ item.purchase_tracking or "-" }}</dd></div>
-      {% endif %}
+<div class="flex justify-between"><dt class="text-slate-400">FINN ID</dt><dd>{% if item.purchase_tracking %}<a href="https://www.finn.no/{{ item.purchase_tracking }}" target="_blank" class="text-accent underline">{{ item.purchase_tracking }}</a>{% else %}-{% endif %}</dd></div>
+{% endif %}
     </dl>
   </section>
 
@@ -51,8 +51,7 @@
       <div class="flex justify-between"><dt class="text-slate-400">Delivery</dt><dd>{{ item.sale_delivery or "-" }}</dd></div>
       {% if item.sale_delivery == "Shipped" %}
       <div class="flex justify-between"><dt class="text-slate-400">Shipping co.</dt><dd>{{ item.sale_shipping_company or "-" }}</dd></div>
-      <div class="flex justify-between"><dt class="text-slate-400">Tracking</dt><dd>{{ item.sale_tracking or "-" }}</dd></div>
-      {% endif %}
+<div class="flex justify-between"><dt class="text-slate-400">FINN ID</dt><dd>{% if item.sale_tracking %}<a href="https://www.finn.no/{{ item.sale_tracking }}" target="_blank" class="text-accent underline">{{ item.sale_tracking }}</a>{% else %}-{% endif %}</dd></div>      {% endif %}
     </dl>
     {% else %}
     <p class="text-slate-500 text-sm">Not sold yet.</p>
