@@ -61,6 +61,19 @@ CREATE TABLE IF NOT EXISTS item_attachments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachments_item ON item_attachments(item_id);
+
+CREATE TABLE IF NOT EXISTS costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    date TEXT,
+    source_item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_costs_item ON costs(item_id);
+CREATE INDEX IF NOT EXISTS idx_costs_source ON costs(source_item_id);
 """
 
 

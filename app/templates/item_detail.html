@@ -10,15 +10,36 @@
   <span class="text-xs px-2 py-1 rounded shrink-0
     {% if item.status == 'sold' %}bg-accent/10 text-accent border border-accent/30
     {% elif item.status == 'listed' %}bg-sky-500/10 text-sky-400 border border-sky-500/30
+    {% elif item.status == 'consumed' %}bg-slate-700/40 text-slate-400 border border-slate-600
     {% else %}bg-amber-500/10 text-amber-400 border border-amber-500/30{% endif %}">
     {{ item.status_label }}
   </span>
 </div>
 
 {% if item.status == 'sold' %}
-<div class="bg-card border border-slate-800 rounded-xl p-4 mb-4 flex justify-between items-center">
-  <span class="text-slate-400 text-sm">Profit</span>
-  <span class="text-xl font-bold {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</span>
+<div class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <div class="flex justify-between text-sm"><span class="text-slate-400">Sale price</span><span>{{ "%.0f"|format(item.sale_price or 0) }} kr</span></div>
+  <div class="flex justify-between text-sm"><span class="text-slate-400">Purchase price</span><span>-{{ "%.0f"|format(item.purchase_price or 0) }} kr</span></div>
+  {% if item.cost_total %}
+  <div class="flex justify-between text-sm"><span class="text-slate-400">Costs ({{ costs|length }})</span><span>-{{ "%.0f"|format(item.cost_total) }} kr</span></div>
+  {% endif %}
+  <div class="flex justify-between items-center mt-2 pt-2 border-t border-slate-800">
+    <span class="text-slate-400 text-sm">Profit</span>
+    <span class="text-xl font-bold {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</span>
+  </div>
+</div>
+{% endif %}
+
+{% if item.status == 'consumed' and consumed_into %}
+<div class="bg-card border border-slate-800 rounded-xl p-4 mb-4 flex justify-between items-center gap-3">
+  <span class="text-sm text-slate-400">Consumed into
+    <a href="/items/{{ consumed_into.target_item_id }}" class="text-accent underline">{{ consumed_into.target_title }}</a>
+    ({{ "%.0f"|format(consumed_into.amount) }} kr)
+  </span>
+  <form method="post" action="/items/{{ item.id }}/consume/undo" onsubmit="return confirm('Undo this and restore the item to in stock?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="text-sm border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300 hover:border-accent">Undo</button>
+  </form>
 </div>
 {% endif %}
 
@@ -58,6 +79,71 @@
     {% endif %}
   </section>
 </div>
+
+<section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-3">Costs {% if costs %}({{ costs|length }}){% endif %}</h2>
+
+  {% if costs %}
+  <div class="space-y-2 mb-4">
+    {% for c in costs %}
+    <div class="flex items-center justify-between gap-3 bg-slate-800/50 border border-slate-800 rounded-lg p-3">
+      <div class="min-w-0">
+        {% if c.source_item_id %}
+        <div class="font-medium truncate">Consumed:
+          {% if c.source_title %}<a href="/items/{{ c.source_item_id }}" class="text-accent underline">{{ c.source_title }}</a>{% else %}{{ c.label }}{% endif %}
+        </div>
+        {% else %}
+        <div class="font-medium truncate">{{ c.label }}</div>
+        {% endif %}
+        <div class="text-xs text-slate-500">{{ c.date or "-" }}</div>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="text-red-400 font-medium">-{{ "%.0f"|format(c.amount) }} kr</span>
+        {% if c.source_item_id %}
+        <form method="post" action="/items/{{ c.source_item_id }}/consume/undo" onsubmit="return confirm('Undo this and restore that item to in stock?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="text-sm border border-slate-700 rounded-lg px-2 py-1 text-slate-300 hover:border-accent">Undo</button>
+        </form>
+        {% else %}
+        <form method="post" action="/items/{{ item.id }}/costs/{{ c.id }}/delete" onsubmit="return confirm('Delete this cost?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="text-red-400 text-sm px-1">&times;</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm mb-4">No costs recorded yet.</p>
+  {% endif %}
+
+  <form method="post" action="/items/{{ item.id }}/costs" class="mb-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto] gap-2">
+      <input required name="label" placeholder="e.g. Replacement cable" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <input required name="amount" type="number" step="0.01" min="0" placeholder="kr" class="w-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <input name="date" type="date" value="{{ today }}" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg text-sm">Add cost</button>
+    </div>
+  </form>
+
+  {% if consume_targets %}
+  <form method="post" action="/items/{{ item.id }}/consume" class="pt-3 border-t border-slate-800">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="block text-sm text-slate-400 mb-2">Mark this item as used in another item</label>
+    <div class="flex gap-2">
+      <select name="target_item_id" required class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+        <option value="">Choose an item…</option>
+        {% for t in consume_targets %}
+        <option value="{{ t.id }}">{{ t.title }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold px-4 rounded-lg text-sm whitespace-nowrap">Mark as used</button>
+    </div>
+  </form>
+  {% endif %}
+</section>
 
 {% if item.notes %}
 <section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">

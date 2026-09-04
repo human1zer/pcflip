@@ -95,7 +95,9 @@ def extract_finnkode(raw: str) -> str | None:
 
 
 def fetch_listing(finnkode: str) -> dict:
-    """Returns a dict: finnkode, title, notes, image_url, condition, category.
+    """Returns a dict: finnkode, title, notes, image_url, condition, category,
+    partial (True if this came from the Open Graph fallback rather than the
+    JSON-LD Product block -- condition/category are always None then).
     Cached by finnkode on disk so re-imports never refetch finn.no."""
     cache_path = _cache_path(finnkode)
     if os.path.exists(cache_path):
@@ -151,27 +153,62 @@ def _parse_listing_html(html: str, finnkode: str) -> dict:
             product = data
             break
 
-    if product is None:
+    if product is not None:
+        category_raw = ""
+        for prop in product.get("additionalProperty") or []:
+            if prop.get("name") == "category":
+                category_raw = prop.get("value") or ""
+                break
+
+        return {
+            "finnkode": product.get("sku") or finnkode,
+            "title": product.get("name") or "",
+            "notes": _extract_full_description(soup, product.get("description") or ""),
+            "image_url": product.get("image") or None,
+            "condition": CONDITION_MAP.get(product.get("itemCondition") or ""),
+            "category": _map_category(category_raw),
+            "partial": False,
+        }
+
+    # No JSON-LD Product block -- seen on inactive/sold listings (meta
+    # robots=noindex). Fall back to Open Graph meta tags; these sit in
+    # <head>, outside the <template shadowrootmode> wrapper, so reading
+    # their `content` attribute is unaffected by the TemplateString issue
+    # above (that only breaks *text-node* extraction, not attributes).
+    # Condition/category have no OG equivalent -- left blank rather than guessed.
+    title = _clean_og_title(_meta_content(soup, "og:title"))
+    if not title:
         raise FinnImportError("couldn't find listing data on that page")
 
-    category_raw = ""
-    for prop in product.get("additionalProperty") or []:
-        if prop.get("name") == "category":
-            category_raw = prop.get("value") or ""
-            break
-
     return {
-        "finnkode": product.get("sku") or finnkode,
-        "title": product.get("name") or "",
-        "notes": _extract_full_description(soup, product.get("description") or ""),
-        "image_url": product.get("image") or None,
-        "condition": CONDITION_MAP.get(product.get("itemCondition") or ""),
-        "category": _map_category(category_raw),
+        "finnkode": finnkode,
+        "title": title,
+        "notes": _extract_full_description(soup, _meta_content(soup, "og:description")),
+        "image_url": _meta_content(soup, "og:image") or None,
+        "condition": None,
+        "category": None,
+        "partial": True,
     }
 
 
-def _extract_full_description(soup: BeautifulSoup, jsonld_description: str) -> str:
-    prefix = _normalize_ws(jsonld_description[:100])
+def _meta_content(soup: BeautifulSoup, property_name: str) -> str:
+    tag = soup.find("meta", attrs={"property": property_name})
+    return (tag.get("content") or "").strip() if tag else ""
+
+
+def _clean_og_title(raw: str) -> str:
+    """FINN's og:title is "{title} | FINN-torget" (or a similar site-name
+    suffix) -- take everything before the last " | "."""
+    return raw.rsplit(" | ", 1)[0].strip() if " | " in raw else raw
+
+
+def _extract_full_description(soup: BeautifulSoup, description_hint: str) -> str:
+    """`description_hint` is whatever truncated description text we have --
+    the JSON-LD description, or og:description in the fallback path -- used
+    only to locate the right container by matching its first ~100 chars.
+    Falls back to the whitespace-pre-wrap class selector if that fails (or
+    if there's no hint at all)."""
+    prefix = _normalize_ws(description_hint[:100])
     container = None
 
     if prefix:
@@ -190,7 +227,7 @@ def _extract_full_description(soup: BeautifulSoup, jsonld_description: str) -> s
             break
 
     if container is None:
-        return jsonld_description  # last-resort fallback -- truncated, but better than nothing
+        return description_hint  # last-resort fallback -- truncated, but better than nothing
 
     lines = [_tag_text(p).replace("\xa0", " ").strip() for p in container.find_all("p", recursive=False)]
     return "\n".join(lines)

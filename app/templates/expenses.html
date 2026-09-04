@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Expenses - {{ app_name }}{% endblock %}
+{% block content %}
+
+<h1 class="text-xl font-semibold mb-4">General expenses</h1>
+<p class="text-sm text-slate-500 mb-4">Overhead not tied to any single item — tools, bulk supplies, equipment, subscriptions.</p>
+
+{% if error %}
+<div class="mb-4 bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
+{% endif %}
+
+<div class="bg-card border border-slate-800 rounded-xl p-4 mb-4 flex justify-between items-center">
+  <span class="text-slate-400 text-sm">Total</span>
+  <span class="text-xl font-bold text-red-400">-{{ "%.0f"|format(total) }} kr</span>
+</div>
+
+<section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  {% if expenses %}
+  <div class="space-y-2 mb-4">
+    {% for e in expenses %}
+    <div class="flex items-center justify-between gap-3 bg-slate-800/50 border border-slate-800 rounded-lg p-3">
+      <div class="min-w-0">
+        <div class="font-medium truncate">{{ e.label }}</div>
+        <div class="text-xs text-slate-500">{{ e.date or "-" }}</div>
+      </div>
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="text-red-400 font-medium">-{{ "%.0f"|format(e.amount) }} kr</span>
+        <form method="post" action="/expenses/{{ e.id }}/delete" onsubmit="return confirm('Delete this expense?');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="text-red-400 text-sm px-1">&times;</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm mb-4">No general expenses recorded yet.</p>
+  {% endif %}
+
+  <form method="post" action="/expenses" class="space-y-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div>
+      <label class="block text-sm text-slate-400 mb-1">Label *</label>
+      <input required name="label" placeholder="e.g. Screwdriver set" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="block text-sm text-slate-400 mb-1">Amount (kr) *</label>
+        <input required name="amount" type="number" step="0.01" min="0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+      </div>
+      <div>
+        <label class="block text-sm text-slate-400 mb-1">Date</label>
+        <input name="date" type="date" value="{{ today }}" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
+      </div>
+    </div>
+    <button type="submit" class="w-full bg-accent hover:opacity-90 text-slate-950 font-semibold py-2.5 rounded-lg">Add expense</button>
+  </form>
+</section>
+
+{% endblock %}

@@ -13,10 +13,11 @@ import csv
 import io
 import sqlite3
 import requests
+from datetime import date
 
 from . import database, config, auth, finn_import
 from .constants import (
-    CATEGORIES, CONDITIONS, STATUSES, STATUS_LABELS,
+    CATEGORIES, CONDITIONS, STATUS_LABELS, EDITABLE_STATUSES,
     PAYMENT_METHODS, DELIVERY_METHODS,
 )
 
@@ -104,14 +105,56 @@ async def logout(request: Request):
     return response
 
 
-def row_to_dict(row):
+def _compute_profit(status, sale_price, purchase_price, cost_total):
+    if status == "sold" and sale_price is not None and purchase_price is not None:
+        return sale_price - purchase_price - cost_total
+    return 0
+
+
+def row_to_dict(row, cost_total=0.0):
     d = dict(row)
     d["status_label"] = STATUS_LABELS.get(d["status"], d["status"])
-    if d.get("status") == "sold" and d.get("sale_price") is not None and d.get("purchase_price") is not None:
-        d["profit"] = d["sale_price"] - d["purchase_price"]
-    else:
-        d["profit"] = 0
+    d["cost_total"] = cost_total
+    d["profit"] = _compute_profit(d["status"], d.get("sale_price"), d.get("purchase_price"), cost_total)
     return d
+
+
+def get_cost_totals(conn) -> dict:
+    """{item_id: sum(amount)} for every item that has at least one linked cost."""
+    rows = conn.execute(
+        "SELECT item_id, SUM(amount) AS total FROM costs WHERE item_id IS NOT NULL GROUP BY item_id"
+    ).fetchall()
+    return {r["item_id"]: r["total"] for r in rows}
+
+
+def get_costs(conn, item_id):
+    """This item's own cost rows, each carrying the linked source item's
+    title (if it's a consumption cost) so the template can link to it."""
+    rows = conn.execute(
+        """
+        SELECT costs.*, source.title AS source_title
+        FROM costs LEFT JOIN items AS source ON source.id = costs.source_item_id
+        WHERE costs.item_id = ?
+        ORDER BY costs.date DESC, costs.id DESC
+        """,
+        (item_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_consumed_into(conn, item_id):
+    """If this item was consumed into another one, the cost row (+ target
+    item id/title) recording that -- otherwise None."""
+    row = conn.execute(
+        """
+        SELECT costs.id AS cost_id, costs.amount, target.id AS target_item_id, target.title AS target_title
+        FROM costs JOIN items AS target ON target.id = costs.item_id
+        WHERE costs.source_item_id = ?
+        LIMIT 1
+        """,
+        (item_id,),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def _batch_sibling_ids(conn, item_id: int) -> list[int]:
@@ -247,17 +290,27 @@ FORM_FIELDS = [
 def dashboard(request: Request):
     with database.get_conn() as conn:
         rows = conn.execute("SELECT * FROM items").fetchall()
-    items = [row_to_dict(r) for r in rows]
+        cost_totals = get_cost_totals(conn)
+        general_expenses = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM costs WHERE item_id IS NULL"
+        ).fetchone()[0]
+    items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
 
     in_stock = [i for i in items if i["status"] in ("in_stock", "listed")]
     sold = [i for i in items if i["status"] == "sold"]
+    # "consumed" items are excluded from both buckets above (their spend is
+    # already represented via the cost row they created on their target) and
+    # from total_invested below, so their purchase price is never counted twice.
 
+    total_profit = sum(i["profit"] for i in sold)
     stats = {
         "in_stock_count": len(in_stock),
         "sold_count": len(sold),
-        "total_invested": sum(i["purchase_price"] or 0 for i in items),
+        "total_invested": sum(i["purchase_price"] or 0 for i in items if i["status"] != "consumed"),
         "total_revenue": sum(i["sale_price"] or 0 for i in sold),
-        "total_profit": sum(i["profit"] for i in sold),
+        "total_profit": total_profit,
+        "general_expenses": general_expenses,
+        "net_profit": total_profit - general_expenses,
     }
 
     recent_sales = sorted(sold, key=lambda i: i["sale_date"] or "", reverse=True)[:5]
@@ -284,7 +337,8 @@ def items_list(request: Request, status: str = None, q: str = None):
 
     with database.get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
-        items = [row_to_dict(r) for r in rows]
+        cost_totals = get_cost_totals(conn)
+        items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
         for item in items:
             cover = conn.execute(
                 "SELECT thumb_filename FROM item_photos WHERE item_id = ? ORDER BY sort_order, id LIMIT 1",
@@ -295,9 +349,71 @@ def items_list(request: Request, status: str = None, q: str = None):
     return render(request, "items_list.html", items=items, status=status, q=q or "")
 
 
+def _parse_cost_form(form) -> tuple[dict | None, str | None]:
+    """Shared by item-linked costs and general expenses. Returns (values, error)."""
+    label = (form.get("label") or "").strip()
+    if not label:
+        return None, "Label is required."
+
+    amount_raw = form.get("amount") or ""
+    try:
+        amount = float(str(amount_raw).replace(",", "."))
+    except ValueError:
+        return None, "Amount must be a number."
+    if amount < 0:
+        return None, "Amount can't be negative."
+
+    cost_date = (form.get("date") or "").strip() or None
+    return {"label": label, "amount": amount, "date": cost_date}, None
+
+
+@app.get("/expenses")
+def expenses_list(request: Request):
+    with database.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM costs WHERE item_id IS NULL ORDER BY date DESC, id DESC"
+        ).fetchall()
+        total = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM costs WHERE item_id IS NULL").fetchone()[0]
+    return render(request, "expenses.html", expenses=[dict(r) for r in rows], total=total,
+                  today=date.today().isoformat(), error=None)
+
+
+@app.post("/expenses")
+async def expenses_create(request: Request):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+
+    values, error = _parse_cost_form(form)
+    if error:
+        with database.get_conn() as conn:
+            rows = conn.execute("SELECT * FROM costs WHERE item_id IS NULL ORDER BY date DESC, id DESC").fetchall()
+            total = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM costs WHERE item_id IS NULL").fetchone()[0]
+        return render(request, "expenses.html", expenses=[dict(r) for r in rows], total=total,
+                      today=date.today().isoformat(), error=error, status_code=400)
+
+    with database.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO costs (item_id, label, amount, date) VALUES (NULL, ?, ?, ?)",
+            (values["label"], values["amount"], values["date"]),
+        )
+    return RedirectResponse("/expenses", status_code=303)
+
+
+@app.post("/expenses/{cost_id}/delete")
+async def expenses_delete(request: Request, cost_id: int):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+    with database.get_conn() as conn:
+        # Scoped to item_id IS NULL so this route can never delete an item-linked cost.
+        conn.execute("DELETE FROM costs WHERE id = ? AND item_id IS NULL", (cost_id,))
+    return RedirectResponse("/expenses", status_code=303)
+
+
 FORM_TEMPLATE_CTX = dict(
     categories=CATEGORIES, conditions=CONDITIONS,
-    statuses=STATUSES, status_labels=STATUS_LABELS,
+    statuses=EDITABLE_STATUSES, status_labels=STATUS_LABELS,
     payment_methods=PAYMENT_METHODS, delivery_methods=DELIVERY_METHODS,
 )
 
@@ -443,7 +559,13 @@ async def item_import_finn(request: Request):
         merged["category"] = listing["category"]
     merged["finn_image_url"] = listing["image_url"] or ""
 
-    return render(request, "item_form.html", item=merged, is_edit=False, error=None, **FORM_TEMPLATE_CTX)
+    notice = None
+    if listing.get("partial"):
+        notice = ("Partial import — this listing has no structured data left (likely sold or inactive), "
+                   "so only the title, photo, and description came through. Condition and category weren't "
+                   "detected; fill those in manually.")
+
+    return render(request, "item_form.html", item=merged, is_edit=False, error=None, notice=notice, **FORM_TEMPLATE_CTX)
 
 
 @app.get("/items/{item_id}")
@@ -454,8 +576,21 @@ def item_detail(request: Request, item_id: int):
             return RedirectResponse("/items", status_code=303)
         photos = get_photos(conn, item_id)
         attachments = get_attachments(conn, item_id)
-    item = row_to_dict(row)
-    return render(request, "item_detail.html", item=item, photos=photos, attachments=attachments)
+        costs = get_costs(conn, item_id)
+        cost_total = sum(c["amount"] for c in costs)
+        consumed_into = get_consumed_into(conn, item_id) if row["status"] == "consumed" else None
+        consume_targets = []
+        if row["status"] in ("in_stock", "listed"):
+            consume_targets = [
+                dict(r) for r in conn.execute(
+                    "SELECT id, title FROM items WHERE status IN ('in_stock', 'listed') AND id != ? ORDER BY title",
+                    (item_id,),
+                ).fetchall()
+            ]
+    item = row_to_dict(row, cost_total)
+    return render(request, "item_detail.html", item=item, photos=photos, attachments=attachments,
+                  costs=costs, today=date.today().isoformat(),
+                  consumed_into=consumed_into, consume_targets=consume_targets)
 
 
 @app.get("/items/{item_id}/edit")
@@ -493,6 +628,84 @@ async def item_update(request: Request, item_id: int):
                       error="Couldn't save item — check the required fields.", is_edit=True,
                       status_code=400, **FORM_TEMPLATE_CTX)
 
+    return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+
+@app.post("/items/{item_id}/costs")
+async def item_cost_create(request: Request, item_id: int):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+
+    values, error = _parse_cost_form(form)
+    if error:
+        # Costs aren't shown as a distinct error state in the template today;
+        # redirecting back keeps this simple and consistent with how photo/
+        # attachment uploads silently no-op on bad input.
+        return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+    with database.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO costs (item_id, label, amount, date) VALUES (?, ?, ?, ?)",
+            (item_id, values["label"], values["amount"], values["date"]),
+        )
+    return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+
+@app.post("/items/{item_id}/costs/{cost_id}/delete")
+async def item_cost_delete(request: Request, item_id: int, cost_id: int):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+    with database.get_conn() as conn:
+        # source_item_id IS NULL so a consumption-linked cost can't be deleted
+        # here -- that must go through /consume/undo to keep the source
+        # item's status in sync.
+        conn.execute(
+            "DELETE FROM costs WHERE id = ? AND item_id = ? AND source_item_id IS NULL",
+            (cost_id, item_id),
+        )
+    return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+
+@app.post("/items/{item_id}/consume")
+async def item_consume(request: Request, item_id: int):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+
+    try:
+        target_id = int(form.get("target_item_id") or "")
+    except ValueError:
+        return RedirectResponse(f"/items/{item_id}", status_code=303)
+    if target_id == item_id:
+        return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+    with database.get_conn() as conn:
+        source = conn.execute("SELECT * FROM items WHERE id = ? AND status IN ('in_stock', 'listed')",
+                               (item_id,)).fetchone()
+        target = conn.execute("SELECT * FROM items WHERE id = ? AND status IN ('in_stock', 'listed')",
+                               (target_id,)).fetchone()
+        if not source or not target:
+            return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+        conn.execute(
+            "INSERT INTO costs (item_id, label, amount, source_item_id) VALUES (?, ?, ?, ?)",
+            (target_id, f"Consumed: {source['title']}", source["purchase_price"] or 0, item_id),
+        )
+        conn.execute("UPDATE items SET status = 'consumed' WHERE id = ?", (item_id,))
+
+    return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+
+@app.post("/items/{item_id}/consume/undo")
+async def item_consume_undo(request: Request, item_id: int):
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return RedirectResponse("/login", status_code=303)
+    with database.get_conn() as conn:
+        conn.execute("DELETE FROM costs WHERE source_item_id = ?", (item_id,))
+        conn.execute("UPDATE items SET status = 'in_stock' WHERE id = ? AND status = 'consumed'", (item_id,))
     return RedirectResponse(f"/items/{item_id}", status_code=303)
 
 
@@ -568,8 +781,19 @@ async def item_delete(request: Request, item_id: int):
     with database.get_conn() as conn:
         photos = get_photos(conn, item_id)
         attachments = get_attachments(conn, item_id)
-        # Cascades away this item's own item_photos/item_attachments rows,
-        # but leaves any sibling batch items' rows (and their files) intact.
+
+        # Restore any items consumed into this one *before* deleting -- the
+        # cost rows recording those consumptions are about to cascade away
+        # with this item, and if we didn't do this first they'd be left
+        # stuck at status='consumed' with nothing left pointing to them.
+        consumed_children = conn.execute(
+            "SELECT source_item_id FROM costs WHERE item_id = ? AND source_item_id IS NOT NULL", (item_id,)
+        ).fetchall()
+        for row in consumed_children:
+            conn.execute("UPDATE items SET status = 'in_stock' WHERE id = ?", (row["source_item_id"],))
+
+        # Cascades away this item's own item_photos/item_attachments/costs
+        # rows, but leaves any sibling batch items' rows (and their files) intact.
         conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
 
         for photo in photos:
@@ -603,14 +827,39 @@ async def item_delete(request: Request, item_id: int):
 def export_csv():
     with database.get_conn() as conn:
         rows = conn.execute("SELECT * FROM items ORDER BY created_at DESC").fetchall()
+        cost_totals = get_cost_totals(conn)
+        general_expenses = conn.execute(
+            "SELECT label, amount, date FROM costs WHERE item_id IS NULL ORDER BY date DESC, id DESC"
+        ).fetchall()
 
     output = io.StringIO()
     output.write("\ufeff")  # UTF-8 BOM so Excel renders norwegian characters correctly
+
     if rows:
-        writer = csv.DictWriter(output, fieldnames=rows[0].keys())
-        writer.writeheader()
+        item_rows = []
         for r in rows:
-            writer.writerow(dict(r))
+            d = dict(r)
+            cost_total = cost_totals.get(d["id"], 0.0)
+            d["cost_total"] = cost_total
+            d["profit"] = _compute_profit(d["status"], d.get("sale_price"), d.get("purchase_price"), cost_total)
+            item_rows.append(d)
+        # `status` (already a raw column here) plus cost_total/profit are what
+        # let a reader avoid double counting: a 'consumed' item's own
+        # purchase_price is also folded into its target's cost_total/profit,
+        # so it must not be summed again as if it were still unsold stock.
+        writer = csv.DictWriter(output, fieldnames=list(item_rows[0].keys()))
+        writer.writeheader()
+        for d in item_rows:
+            writer.writerow(d)
+
+    if general_expenses:
+        output.write("\n")
+        output.write("General expenses (not attributed to any item)\n")
+        exp_writer = csv.DictWriter(output, fieldnames=["label", "amount", "date"])
+        exp_writer.writeheader()
+        for e in general_expenses:
+            exp_writer.writerow(dict(e))
+
     output.seek(0)
     return StreamingResponse(
         iter([output.getvalue()]),

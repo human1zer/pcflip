@@ -22,6 +22,7 @@
   <a href="/items?status=in_stock{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='in_stock' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">In stock</a>
   <a href="/items?status=listed{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='listed' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Listed</a>
   <a href="/items?status=sold{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='sold' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Sold</a>
+  <a href="/items?status=consumed{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='consumed' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Consumed</a>
 </div>
 
 {% if q %}<p class="text-sm text-slate-400 mb-3">Search results for "{{ q }}"</p>{% endif %}
@@ -48,6 +49,7 @@
         <span class="text-xs px-2 py-1 rounded
           {% if item.status == 'sold' %}bg-accent/10 text-accent border border-accent/30
           {% elif item.status == 'listed' %}bg-sky-500/10 text-sky-400 border border-sky-500/30
+          {% elif item.status == 'consumed' %}bg-slate-700/40 text-slate-400 border border-slate-600
           {% else %}bg-amber-500/10 text-amber-400 border border-amber-500/30{% endif %}">
           {{ item.status_label }}
         </span>

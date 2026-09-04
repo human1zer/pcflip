@@ -31,6 +31,7 @@
     <nav class="flex items-center gap-4 text-sm text-slate-300">
       <a href="/" class="hover:text-accent">Dashboard</a>
       <a href="/items" class="hover:text-accent">Items</a>
+      <a href="/expenses" class="hover:text-accent">Expenses</a>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="hover:text-accent">Log out</button>

@@ -18,9 +18,11 @@
     <div class="text-2xl font-bold mt-1">{{ "%.0f"|format(stats.total_invested) }} kr</div>
   </div>
   <div class="bg-card border border-slate-800 rounded-xl p-4">
-    <div class="text-slate-400 text-xs uppercase tracking-wide">Profit</div>
-    <div class="text-2xl font-bold mt-1 {% if stats.total_profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
-      {{ "%.0f"|format(stats.total_profit) }} kr
+    <div class="text-slate-400 text-xs uppercase tracking-wide mb-1">Profit</div>
+    <div class="flex justify-between text-xs text-slate-400"><span>Item profit</span><span>{{ "%+.0f"|format(stats.total_profit) }}</span></div>
+    <div class="flex justify-between text-xs text-slate-400"><span>General exp.</span><span>{{ "%+.0f"|format(-stats.general_expenses) }}</span></div>
+    <div class="flex justify-between text-sm font-bold mt-1 pt-1 border-t border-slate-800 {% if stats.net_profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
+      <span>Net</span><span>{{ "%+.0f"|format(stats.net_profit) }}</span>
     </div>
   </div>
 </div>

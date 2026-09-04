@@ -8,6 +8,10 @@
 <div class="mb-4 bg-red-950 border border-red-800 text-red-300 rounded-lg px-4 py-3 text-sm">{{ error }}</div>
 {% endif %}
 
+{% if notice %}
+<div class="mb-4 bg-amber-950 border border-amber-800 text-amber-300 rounded-lg px-4 py-3 text-sm">{{ notice }}</div>
+{% endif %}
+
 {# Keep this action explicit -- without one the form posts to the current
    URL, which breaks after the FINN-import endpoint re-renders this same
    form in place at its own /items/import/finn URL. See CLAUDE.md. #}
@@ -78,11 +82,18 @@
 
     <div>
       <label class="block text-sm text-slate-400 mb-1">Status</label>
+      {% if item and item.status == 'consumed' %}
+      <input type="hidden" name="status" value="consumed">
+      <p class="text-sm bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+        Consumed — use "Undo" on the <a href="/items/{{ item.id }}" class="text-accent underline">item page</a> to restore it before changing anything else.
+      </p>
+      {% else %}
       <select name="status" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2">
         {% for s in statuses %}
         <option value="{{ s }}" {% if item and item.status == s %}selected{% endif %}>{{ status_labels[s] }}</option>
         {% endfor %}
       </select>
+      {% endif %}
     </div>
   </section>
 
