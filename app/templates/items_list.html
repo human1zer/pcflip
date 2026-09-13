@@ -7,25 +7,40 @@
   <a href="/export.csv" class="text-sm text-slate-400 hover:text-accent border border-slate-700 rounded-lg px-3 py-1.5">Export CSV</a>
 </div>
 
-<form method="get" action="/items" class="mb-4">
+<form method="get" action="/items" class="mb-4 space-y-2">
   {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
   <div class="flex gap-2">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search title, serial, seller, buyer..."
+    <input type="text" name="q" value="{{ q }}" placeholder="Search title, serial, seller, buyer, notes, category..."
       class="flex-1 bg-card border border-slate-700 rounded-lg px-3 py-2 text-sm">
     <button type="submit" class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm">Search</button>
-    {% if q %}<a href="/items{% if status %}?status={{ status }}{% endif %}" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400">Clear</a>{% endif %}
+    {% if q %}<a href="/items{{ qs(q=None) }}" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400">Clear</a>{% endif %}
+  </div>
+  <div class="flex gap-2">
+    <select name="category" onchange="this.form.submit()"
+      class="flex-1 bg-card border border-slate-700 rounded-lg px-2 py-2 text-sm">
+      <option value="">All categories</option>
+      {% for c in categories %}
+      <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort" onchange="this.form.submit()"
+      class="flex-1 bg-card border border-slate-700 rounded-lg px-2 py-2 text-sm">
+      {% for key, opt in sort_options.items() %}
+      <option value="{{ key }}" {% if sort == key %}selected{% endif %}>{{ opt[0] }}</option>
+      {% endfor %}
+    </select>
   </div>
 </form>
 
 <div class="flex gap-2 mb-4 overflow-x-auto text-sm">
-  <a href="/items{% if q %}?q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if not status %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">All</a>
-  <a href="/items?status=in_stock{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='in_stock' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">In stock</a>
-  <a href="/items?status=listed{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='listed' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Listed</a>
-  <a href="/items?status=sold{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='sold' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Sold</a>
-  <a href="/items?status=consumed{% if q %}&q={{ q }}{% endif %}" class="px-3 py-1.5 rounded-full border {% if status=='consumed' %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">Consumed</a>
+  {% for tab in status_tabs %}
+  <a href="{{ tab.href }}" class="px-3 py-1.5 rounded-full border whitespace-nowrap {% if tab.active %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">{{ tab.label }}</a>
+  {% endfor %}
 </div>
 
-{% if q %}<p class="text-sm text-slate-400 mb-3">Search results for "{{ q }}"</p>{% endif %}
+<p class="text-sm text-slate-400 mb-3">
+  {{ items|length }} item{{ "s" if items|length != 1 else "" }}{% if q %} matching "{{ q }}"{% endif %}{% if category %} in {{ category }}{% endif %}
+</p>
 
 {% if items %}
 <div class="space-y-2">

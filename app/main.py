@@ -14,6 +14,7 @@ import io
 import sqlite3
 import requests
 from datetime import date
+from urllib.parse import urlencode
 
 from . import database, config, auth, finn_import
 from .constants import (
@@ -322,18 +323,36 @@ def dashboard(request: Request):
     )
 
 
+SORT_OPTIONS = {
+    # key: (label, sort key function, reverse)
+    "newest": ("Newest first", lambda i: i["created_at"] or "", True),
+    "oldest": ("Oldest first", lambda i: i["created_at"] or "", False),
+    "title": ("Title A-Z", lambda i: (i["title"] or "").lower(), False),
+    "price_desc": ("Price: high to low", lambda i: i["purchase_price"] if i["purchase_price"] is not None else -1, True),
+    "price_asc": ("Price: low to high", lambda i: i["purchase_price"] if i["purchase_price"] is not None else float("inf"), False),
+    "profit_desc": ("Profit: high to low", lambda i: i["profit"], True),
+}
+STATUS_TABS = [(None, "All"), ("in_stock", "In stock"), ("listed", "Listed"), ("sold", "Sold"), ("consumed", "Consumed")]
+
+
 @app.get("/items")
-def items_list(request: Request, status: str = None, q: str = None):
+def items_list(request: Request, status: str = None, category: str = None, q: str = None, sort: str = "newest"):
+    if sort not in SORT_OPTIONS:
+        sort = "newest"
+
     query = "SELECT * FROM items WHERE 1=1"
     params = []
     if status:
         query += " AND status = ?"
         params.append(status)
+    if category:
+        query += " AND category = ?"
+        params.append(category)
     if q:
-        query += " AND (title LIKE ? OR serial_number LIKE ? OR seller_name LIKE ? OR buyer_name LIKE ?)"
+        query += """ AND (title LIKE ? OR serial_number LIKE ? OR seller_name LIKE ?
+                           OR buyer_name LIKE ? OR notes LIKE ? OR category LIKE ?)"""
         like = f"%{q}%"
-        params += [like, like, like, like]
-    query += " ORDER BY created_at DESC"
+        params += [like] * 6
 
     with database.get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
@@ -346,7 +365,22 @@ def items_list(request: Request, status: str = None, q: str = None):
             ).fetchone()
             item["cover_photo"] = cover["thumb_filename"] if cover else None
 
-    return render(request, "items_list.html", items=items, status=status, q=q or "")
+    _, sort_key, sort_reverse = SORT_OPTIONS[sort]
+    items.sort(key=sort_key, reverse=sort_reverse)
+
+    def qs(**overrides):
+        params = {"q": q, "category": category, "sort": None if sort == "newest" else sort, "status": status}
+        params.update(overrides)
+        params = {k: v for k, v in params.items() if v}
+        return f"?{urlencode(params)}" if params else ""
+
+    status_tabs = [
+        {"value": value, "label": label, "href": f"/items{qs(status=value)}", "active": status == value}
+        for value, label in STATUS_TABS
+    ]
+
+    return render(request, "items_list.html", items=items, status=status, category=category, q=q or "",
+                  sort=sort, sort_options=SORT_OPTIONS, status_tabs=status_tabs, categories=CATEGORIES, qs=qs)
 
 
 def _parse_cost_form(form) -> tuple[dict | None, str | None]:

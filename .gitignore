@@ -21,3 +21,4 @@ venv/
 # OS junk
 .DS_Store
 backup.log
+data/finn_cache/
