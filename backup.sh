@@ -38,23 +38,33 @@ else
 fi
 
 # Photos/attachments: hardlink against the previous snapshot so only
-# changed files use new disk space.
+# changed files use new disk space. --no-perms because the backup disk is
+# NTFS, which shows every file as 644 regardless of the source mode -- with
+# perms compared, any 775 source file never matched and got fully re-copied
+# on every run instead of hardlinked.
 if [ -L "$LATEST_LINK" ] || [ -d "$LATEST_LINK" ]; then
-    /usr/bin/rsync -a --link-dest="$LATEST_LINK" \
+    /usr/bin/rsync -a --no-perms --link-dest="$LATEST_LINK" \
         --exclude pcflip.db \
         "$SOURCE_DIR/" "$SNAPSHOT_DIR/" >> "$LOG" 2>&1
 else
-    /usr/bin/rsync -a --exclude pcflip.db "$SOURCE_DIR/" "$SNAPSHOT_DIR/" >> "$LOG" 2>&1
+    /usr/bin/rsync -a --no-perms --exclude pcflip.db "$SOURCE_DIR/" "$SNAPSHOT_DIR/" >> "$LOG" 2>&1
 fi
 RSYNC_RESULT=$?
 
-if [ $DB_RESULT -eq 0 ] && [ $RSYNC_RESULT -eq 0 ]; then
-    rm -f "$LATEST_LINK"
-    ln -s "$SNAPSHOT_DIR" "$LATEST_LINK"
-    echo "$(date): pcflip backup completed successfully -> $SNAPSHOT_DIR" >> "$LOG"
+# Check the copy we just made, not just that sqlite3 exited 0.
+INTEGRITY="$(/usr/bin/sqlite3 "$SNAPSHOT_DIR/pcflip.db" "PRAGMA integrity_check;" 2>&1)"
+if [ "$INTEGRITY" = "ok" ]; then INTEGRITY_RESULT=0; else INTEGRITY_RESULT=1; fi
 
-    # Prune snapshots older than RETENTION_DAYS.
-    find "$DEST_ROOT/snapshots" -maxdepth 1 -mindepth 1 -type d -mtime "+$RETENTION_DAYS" -exec rm -rf {} \; >> "$LOG" 2>&1
-else
-    echo "$(date): pcflip backup FAILED (db=$DB_RESULT rsync=$RSYNC_RESULT)" >> "$LOG"
+# On failure: don't move `latest` or prune anything, and exit non-zero so
+# cron (or whoever ran this) can tell -- logging alone used to exit 0.
+if [ $DB_RESULT -ne 0 ] || [ $RSYNC_RESULT -ne 0 ] || [ $INTEGRITY_RESULT -ne 0 ]; then
+    echo "$(date): pcflip backup FAILED (db=$DB_RESULT rsync=$RSYNC_RESULT integrity=${INTEGRITY:-no output}) -> $SNAPSHOT_DIR" >> "$LOG"
+    exit 1
 fi
+
+rm -f "$LATEST_LINK"
+ln -s "$SNAPSHOT_DIR" "$LATEST_LINK"
+echo "$(date): pcflip backup completed successfully -> $SNAPSHOT_DIR" >> "$LOG"
+
+# Prune snapshots older than RETENTION_DAYS.
+find "$DEST_ROOT/snapshots" -maxdepth 1 -mindepth 1 -type d -mtime "+$RETENTION_DAYS" -exec rm -rf {} \; >> "$LOG" 2>&1
