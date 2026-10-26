@@ -107,7 +107,8 @@
   {% endif %}
 
   {% if available_parts %}
-  <input id="part-filter" type="search" autocomplete="off" placeholder="Find a part in stock (RAM, SSD…) — Enter adds a single match"
+  <div data-picker>
+  <input id="part-filter" data-picker-input type="search" autocomplete="off" placeholder="Find a part in stock (RAM, SSD…) — Enter adds a single match"
     class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
   <div id="part-list" class="max-h-72 overflow-y-auto space-y-1">
     {% for p in available_parts %}
@@ -123,41 +124,9 @@
       <button type="submit" class="shrink-0 text-sm bg-slate-700 hover:bg-accent hover:text-slate-950 rounded-lg px-3 py-1 font-semibold">+ Add</button>
     </form>
     {% endfor %}
-    <p id="part-none" class="text-sm text-slate-500 px-3 py-2" hidden>No matching parts in stock.</p>
+    <p id="part-none" data-picker-none class="text-sm text-slate-500 px-3 py-2" hidden>No matching parts in stock.</p>
   </div>
-  <script>
-  (function () {
-    var input = document.getElementById('part-filter');
-    var rows = document.querySelectorAll('#part-list [data-search]');
-    var none = document.getElementById('part-none');
-    // Same matching rule as the main search: every word must appear somewhere.
-    function filter() {
-      var words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-      var shown = [];
-      rows.forEach(function (row) {
-        row.hidden = !words.every(function (w) { return row.dataset.search.indexOf(w) !== -1; });
-        if (!row.hidden) shown.push(row);
-      });
-      none.hidden = shown.length > 0;
-      return shown;
-    }
-    input.addEventListener('input', filter);
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        var shown = filter();
-        if (shown.length === 1) shown[0].requestSubmit();
-      } else if (e.key === 'Escape') {
-        if (input.value) { input.value = ''; filter(); } else input.blur();
-      }
-    });
-    // Back here after adding/removing a part: ready to add the next one.
-    // On load, not now -- the browser's own scroll-to-#parts would undo it.
-    if (location.hash === '#parts') {
-      window.addEventListener('load', function () { input.focus({ preventScroll: true }); });
-    }
-  })();
-  </script>
+  </div>
   {% elif item.status in ('in_stock', 'listed') %}
   <p class="text-slate-500 text-sm">No parts in stock to add.</p>
   {% endif %}
@@ -214,19 +183,27 @@
   </form>
 
   {% if consume_targets %}
-  <form method="post" action="/items/{{ item.id }}/consume" class="pt-3 border-t border-slate-800">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="block text-sm text-slate-400 mb-2">Mark this item as used in another item</label>
-    <div class="flex gap-2">
-      <select name="target_item_id" required class="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
-        <option value="">Choose an item…</option>
-        {% for t in consume_targets %}
-        <option value="{{ t.id }}">{{ t.title }}</option>
-        {% endfor %}
-      </select>
-      <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-100 font-semibold px-4 rounded-lg text-sm whitespace-nowrap">Mark as used</button>
+  <div data-picker class="pt-3 border-t border-slate-800">
+    <label for="target-filter" class="block text-sm text-slate-400 mb-2">Install this part in a PC</label>
+    <input id="target-filter" data-picker-input type="search" autocomplete="off" placeholder="Find a PC or laptop in stock — Enter picks a single match"
+      class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
+    <div id="target-list" class="max-h-72 overflow-y-auto space-y-1">
+      {% for t in consume_targets %}
+      {# No next= -- consuming redirects back here, to this part's page. #}
+      <form method="post" action="/items/{{ item.id }}/consume" data-search="{{ t.search_text }}"
+        class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 hover:bg-slate-800/60">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="target_item_id" value="{{ t.id }}">
+        <div class="min-w-0">
+          <div class="text-sm truncate">{{ t.title }}</div>
+          <div class="text-xs text-slate-500">{{ t.category }} · {{ t.status_label }}</div>
+        </div>
+        <button type="submit" class="shrink-0 text-sm bg-slate-700 hover:bg-accent hover:text-slate-950 rounded-lg px-3 py-1 font-semibold">Use in this</button>
+      </form>
+      {% endfor %}
+      <p data-picker-none class="text-sm text-slate-500 px-3 py-2" hidden>No matching PCs in stock.</p>
     </div>
-  </form>
+  </div>
   {% endif %}
 </section>
 
@@ -306,6 +283,43 @@
     </div>
   </form>
 </section>
+
+<script>
+// Search-and-pick lists ([data-picker]): the Parts panel on PC pages and the
+// "Install this part in a PC" list on part pages. Typing filters the rows
+// (same rule as the main search: every word must appear); Enter submits the
+// single remaining match; Esc clears, then leaves the box.
+document.querySelectorAll('[data-picker]').forEach(function (picker) {
+  var input = picker.querySelector('[data-picker-input]');
+  var rows = picker.querySelectorAll('[data-search]');
+  var none = picker.querySelector('[data-picker-none]');
+  function filter() {
+    var words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = [];
+    rows.forEach(function (row) {
+      row.hidden = !words.every(function (w) { return row.dataset.search.indexOf(w) !== -1; });
+      if (!row.hidden) shown.push(row);
+    });
+    none.hidden = shown.length > 0;
+    return shown;
+  }
+  input.addEventListener('input', filter);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      var shown = filter();
+      if (shown.length === 1) shown[0].requestSubmit();
+    } else if (e.key === 'Escape') {
+      if (input.value) { input.value = ''; filter(); } else input.blur();
+    }
+  });
+});
+// Back on a PC after adding/removing a part: ready to add the next one.
+// On load, not now -- the browser's own scroll-to-#parts would undo it.
+if (location.hash === '#parts' && document.getElementById('part-filter')) {
+  window.addEventListener('load', function () { document.getElementById('part-filter').focus({ preventScroll: true }); });
+}
+</script>
 
 <div class="flex gap-3">
   <a href="/items/{{ item.id }}/edit" class="flex-1 text-center bg-slate-800 hover:bg-slate-700 py-3 rounded-lg font-medium">Edit</a>

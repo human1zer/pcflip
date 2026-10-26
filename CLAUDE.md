@@ -42,7 +42,12 @@ CDN, no build step). Deployed with Docker Compose.
 - **Parts panel** on Desktop PC / Laptop pages (`PC_CATEGORIES`): lists
   in-stock/listed non-PC items; "+ Add" posts to the existing
   `/items/{part}/consume`, "Remove" to `/consume/undo`, both with
-  `next=` to come back to the PC.
+  `next=` to come back to the PC. The mirror image on a part's page
+  ("Install this part in a PC", in-stock/listed parts only) lists
+  in-stock/listed PCs/laptops and redirects back to the part. Both lists
+  share one `[data-picker]` script in `item_detail.html`, and
+  `/consume` itself refuses any target that isn't a PC/laptop (and any
+  PC/laptop as the source).
 - **Inline edit** on the list: status, purchase price, sale price/date,
   notes. Mouse-picking a non-sold status saves immediately; "Sold" asks
   for price/date first (date defaults to today).

@@ -640,19 +640,23 @@ def item_detail(request: Request, item_id: int):
         costs = get_costs(conn, item_id)
         cost_total = sum(c["amount"] for c in costs)
         consumed_into = get_consumed_into(conn, item_id) if row["status"] == "consumed" else None
+        placeholders = ", ".join("?" for _ in PC_CATEGORIES)
+        # Parts get a searchable list of in-stock PCs/laptops to install
+        # (consume) themselves into -- the mirror of the PC page's Parts panel.
         consume_targets = []
-        if row["status"] in ("in_stock", "listed"):
-            consume_targets = [
-                dict(r) for r in conn.execute(
-                    "SELECT id, title FROM items WHERE status IN ('in_stock', 'listed') AND id != ? ORDER BY title",
-                    (item_id,),
-                ).fetchall()
-            ]
+        if row["category"] not in PC_CATEGORIES and row["status"] in ("in_stock", "listed"):
+            target_rows = conn.execute(
+                f"""SELECT * FROM items WHERE status IN ('in_stock', 'listed') AND id != ?
+                    AND category IN ({placeholders}) ORDER BY category, title""",
+                (item_id, *PC_CATEGORIES),
+            ).fetchall()
+            consume_targets = [row_to_dict(r) for r in target_rows]
+            for target in consume_targets:
+                target["search_text"] = _search_text(target)
         # PCs/laptops get a searchable list of in-stock parts to install
         # (consume) into them straight from their own page.
         available_parts = []
         if row["category"] in PC_CATEGORIES and row["status"] in ("in_stock", "listed"):
-            placeholders = ", ".join("?" for _ in PC_CATEGORIES)
             part_rows = conn.execute(
                 f"""SELECT * FROM items WHERE status IN ('in_stock', 'listed') AND id != ?
                     AND COALESCE(category, '') NOT IN ({placeholders}) ORDER BY category, title""",
@@ -837,7 +841,8 @@ async def item_consume(request: Request, item_id: int):
                                (item_id,)).fetchone()
         target = conn.execute("SELECT * FROM items WHERE id = ? AND status IN ('in_stock', 'listed')",
                                (target_id,)).fetchone()
-        if not source or not target:
+        # Parts are only ever installed into a PC/laptop, never into another part.
+        if not source or not target or target["category"] not in PC_CATEGORIES or source["category"] in PC_CATEGORIES:
             return RedirectResponse(back, status_code=303)
 
         conn.execute(
