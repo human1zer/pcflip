@@ -2,28 +2,7 @@
 {% block title %}Items - {{ app_name }}{% endblock %}
 {% block content %}
 
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-  <div class="bg-card border border-slate-800 rounded-xl p-4">
-    <div class="text-slate-400 text-xs uppercase tracking-wide">In stock</div>
-    <div class="text-2xl font-bold mt-1">{{ stats.in_stock_count }}</div>
-  </div>
-  <div class="bg-card border border-slate-800 rounded-xl p-4">
-    <div class="text-slate-400 text-xs uppercase tracking-wide">Sold</div>
-    <div class="text-2xl font-bold mt-1">{{ stats.sold_count }}</div>
-  </div>
-  <div class="bg-card border border-slate-800 rounded-xl p-4">
-    <div class="text-slate-400 text-xs uppercase tracking-wide">Invested</div>
-    <div class="text-2xl font-bold mt-1">{{ "%.0f"|format(stats.total_invested) }} kr</div>
-  </div>
-  <div class="bg-card border border-slate-800 rounded-xl p-4">
-    <div class="text-slate-400 text-xs uppercase tracking-wide mb-1">Profit</div>
-    <div class="flex justify-between text-xs text-slate-400"><span>Item profit</span><span>{{ "%+.0f"|format(stats.total_profit) }}</span></div>
-    <div class="flex justify-between text-xs text-slate-400"><span>General exp.</span><span>{{ "%+.0f"|format(-stats.general_expenses) }}</span></div>
-    <div class="flex justify-between text-sm font-bold mt-1 pt-1 border-t border-slate-800 {% if stats.net_profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
-      <span>Net</span><span>{{ "%+.0f"|format(stats.net_profit) }}</span>
-    </div>
-  </div>
-</div>
+{% include "_stats.html" %}
 
 <div class="flex items-center justify-between gap-2 mb-4">
   <div class="flex gap-2 overflow-x-auto text-sm">
@@ -52,40 +31,148 @@
   </form>
 </div>
 
-<div id="items-list" class="space-y-2">
+<div id="items-list" class="space-y-2" data-csrf="{{ csrf_token }}" data-today="{{ today }}">
   {% for item in items %}
-  <a href="/items/{{ item.id }}" data-search="{{ item.search_text }}" {% if item.search_hidden %}hidden{% endif %}
-    class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
-    <div class="flex justify-between items-start gap-3">
-      {% if item.cover_photo %}
-      <img src="/photos/{{ item.cover_photo }}" loading="lazy" class="w-14 h-14 object-cover rounded-lg border border-slate-800 shrink-0">
-      {% else %}
-      <div class="w-14 h-14 rounded-lg bg-slate-800 shrink-0"></div>
-      {% endif %}
-      <div class="min-w-0 flex-1">
-        <div class="font-medium truncate">{{ item.title }}</div>
-        <div class="text-xs text-slate-400 truncate">
-          {{ item.category or "Uncategorized" }}
-          {% if item.serial_number %} · SN: {{ item.serial_number }}{% endif %}
-        </div>
-        <div class="text-xs text-slate-500 mt-1">Bought from {{ item.seller_name or "?" }} for {{ "%.0f"|format(item.purchase_price or 0) }} kr</div>
-      </div>
-      <div class="text-right shrink-0">
-        <span class="text-xs px-2 py-1 rounded
-          {% if item.status == 'sold' %}bg-accent/10 text-accent border border-accent/30
-          {% elif item.status == 'listed' %}bg-sky-500/10 text-sky-400 border border-sky-500/30
-          {% elif item.status == 'consumed' %}bg-slate-700/40 text-slate-400 border border-slate-600
-          {% else %}bg-amber-500/10 text-amber-400 border border-amber-500/30{% endif %}">
-          {{ item.status_label }}
-        </span>
-        {% if item.status == 'sold' %}
-        <div class="text-xs mt-1 {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</div>
-        {% endif %}
-      </div>
-    </div>
-  </a>
+  {% include "_item_row.html" %}
   {% endfor %}
 </div>
 <p id="no-matches" class="text-slate-500" {% if match_count %}hidden{% endif %}>No items found.</p>
+
+<script>
+// Inline editing: click a [data-edit] button in a row, edit, Enter saves, Esc
+// cancels. Saves POST only the edited fields to /items/{id}/quick, which
+// returns the re-rendered row + stats cards.
+(function () {
+  var list = document.getElementById('items-list');
+  var STATUSES = {{ editable_statuses|tojson }};
+  var LABELS = {{ status_labels|tojson }};
+  var FIELD = 'bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm';
+  var open = null;  // {row, editor, trigger}
+
+  function el(tag, attrs, children) {
+    var node = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+    (children || []).forEach(function (c) { node.append(c); });
+    return node;
+  }
+  function labelled(text, input) {
+    return el('label', { class: 'flex flex-col gap-1 text-xs text-slate-400' }, [text, input]);
+  }
+  function moneyInput(name, value) {
+    return el('input', { name: name, value: value, inputmode: 'decimal', autocomplete: 'off', placeholder: 'kr', class: FIELD + ' w-28' });
+  }
+  function saleFields(row) {
+    return el('div', { 'data-sale-fields': '', class: 'flex flex-wrap gap-2' }, [
+      labelled('Sale price', moneyInput('sale_price', row.dataset.salePrice)),
+      labelled('Sale date', el('input', { name: 'sale_date', type: 'date', class: FIELD,
+        value: row.dataset.saleDate || list.dataset.today })),
+    ]);
+  }
+
+  function buildFields(row, kind) {
+    if (kind === 'purchase_price') return [labelled('Purchase price', moneyInput('purchase_price', row.dataset.purchasePrice))];
+    if (kind === 'sale') return [saleFields(row)];
+    if (kind === 'notes') {
+      var ta = el('textarea', { name: 'notes', rows: '4', class: FIELD + ' w-full' });
+      ta.value = row.dataset.notes;
+      return [labelled('Notes (Shift+Enter for a new line)', ta)];
+    }
+    var select = el('select', { name: 'status', class: FIELD }, STATUSES.map(function (s) {
+      var opt = el('option', { value: s }, [LABELS[s]]);
+      if (s === row.dataset.status) opt.selected = true;
+      return opt;
+    }));
+    var sale = saleFields(row);
+    sale.hidden = row.dataset.status !== 'sold';
+    // Picking a non-sold status with the mouse saves right away; "Sold" first
+    // asks for price/date. Arrow keys fire `change` on every step, so keyboard
+    // changes wait for Enter instead of saving whatever they pass through.
+    var viaKeys = false;
+    select.addEventListener('keydown', function (e) { viaKeys = e.key !== 'Enter' && e.key !== 'Escape'; });
+    select.addEventListener('change', function () {
+      sale.hidden = select.value !== 'sold';
+      if (select.value === 'sold') { if (!viaKeys) sale.querySelector('input').focus(); }
+      else if (!viaKeys) save();
+      viaKeys = false;
+    });
+    return [labelled('Status', select), sale];
+  }
+
+  function close() {
+    if (!open) return;
+    open.editor.remove();
+    if (document.body.contains(open.trigger)) open.trigger.focus();
+    open = null;
+  }
+
+  function start(row, kind, trigger) {
+    close();
+    var error = el('p', { class: 'text-xs text-red-400 w-full', hidden: '' });
+    var saveBtn = el('button', { type: 'submit', class: 'bg-accent hover:opacity-90 text-slate-950 font-semibold rounded-lg px-3 py-1.5 text-sm' }, ['Save']);
+    var cancelBtn = el('button', { type: 'button', class: 'border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-300' }, ['Cancel']);
+    var editor = el('form', { class: 'mt-3 pt-3 border-t border-slate-800 flex flex-wrap items-end gap-2' },
+      buildFields(row, kind).concat([el('div', { class: 'flex gap-2' }, [saveBtn, cancelBtn]), error]));
+    editor.addEventListener('submit', function (e) { e.preventDefault(); save(); });
+    cancelBtn.addEventListener('click', close);
+    editor.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Enter' && !e.shiftKey && e.target.tagName !== 'BUTTON') { e.preventDefault(); save(); }
+    });
+    row.append(editor);
+    open = { row: row, editor: editor, trigger: trigger, error: error, saveBtn: saveBtn };
+    var first = editor.querySelector('input:not([type=date]), textarea, select');
+    first.focus();
+    if (first.select) first.select();
+  }
+
+  function save() {
+    if (!open || open.saveBtn.disabled) return;
+    var current = open;
+    var data = new FormData();
+    data.append('csrf_token', list.dataset.csrf);
+    current.editor.querySelectorAll('[name]').forEach(function (f) {
+      if (!f.closest('[data-sale-fields][hidden]')) data.append(f.name, f.value);
+    });
+    current.saveBtn.disabled = true;
+    current.error.hidden = true;
+    fetch('/items/' + current.row.dataset.id + '/quick', { method: 'POST', body: data, headers: { Accept: 'application/json' } })
+      .then(function (res) {
+        // An expired session gets redirected to the login page (HTML, not JSON).
+        if (res.redirected || !(res.headers.get('content-type') || '').includes('json')) {
+          throw new Error('Session expired — reload the page.');
+        }
+        return res.json().then(function (body) {
+          if (!res.ok) throw new Error(body.error || 'Save failed.');
+          return body;
+        });
+      })
+      .then(function (body) {
+        if (open === current) open = null;
+        var fresh = document.createRange().createContextualFragment(body.row).firstElementChild;
+        current.row.replaceWith(fresh);
+        document.getElementById('stats').outerHTML = body.stats;
+        if (window.pcflipFilter) window.pcflipFilter();
+        var kind = current.trigger.dataset.edit;
+        var again = fresh.querySelector('[data-edit="' + kind + '"]') || fresh.querySelector('a');
+        again.focus();
+        fresh.classList.add('border-accent');
+        setTimeout(function () { fresh.classList.remove('border-accent'); }, 800);
+      })
+      .catch(function (err) {
+        current.error.textContent = err.message === 'Failed to fetch' ? 'Network error — not saved.' : err.message;
+        current.error.hidden = false;
+        current.saveBtn.disabled = false;
+      });
+  }
+
+  list.addEventListener('click', function (e) {
+    var trigger = e.target.closest('[data-edit]');
+    if (!trigger) return;
+    var row = trigger.closest('[data-id]');
+    if (open && open.trigger === trigger) { close(); return; }
+    start(row, trigger.dataset.edit, trigger);
+  });
+})();
+</script>
 
 {% endblock %}

@@ -1,0 +1,53 @@
+{# One row of the items list. Rendered in items_list.html and re-rendered by
+   /items/{id}/quick after an inline edit. Only the photo and title link to
+   the item; the [data-edit] buttons open the inline editor instead. #}
+{% set edit_btn = "rounded px-1 -mx-1 border border-transparent hover:border-slate-600 hover:text-slate-200 focus:outline-none focus:border-accent" %}
+<div class="bg-card border border-slate-800 rounded-lg p-3 transition-colors"
+  data-search="{{ item.search_text }}" data-href="/items/{{ item.id }}" data-id="{{ item.id }}"
+  data-status="{{ item.status }}" data-purchase-price="{{ '%g'|format(item.purchase_price) if item.purchase_price is not none else '' }}"
+  data-sale-price="{{ '%g'|format(item.sale_price) if item.sale_price is not none else '' }}"
+  data-sale-date="{{ item.sale_date or '' }}" data-notes="{{ item.notes or '' }}"
+  {% if item.search_hidden %}hidden{% endif %}>
+  <div class="flex justify-between items-start gap-3">
+    <a href="/items/{{ item.id }}" class="shrink-0" tabindex="-1">
+      {% if item.cover_photo %}
+      <img src="/photos/{{ item.cover_photo }}" loading="lazy" class="w-14 h-14 object-cover rounded-lg border border-slate-800">
+      {% else %}
+      <div class="w-14 h-14 rounded-lg bg-slate-800"></div>
+      {% endif %}
+    </a>
+    <div class="min-w-0 flex-1">
+      <a href="/items/{{ item.id }}" class="block font-medium truncate hover:text-accent">{{ item.title }}</a>
+      <div class="text-xs text-slate-400 truncate">
+        {{ item.category or "Uncategorized" }}
+        {% if item.serial_number %} · SN: {{ item.serial_number }}{% endif %}
+      </div>
+      <div class="text-xs text-slate-500 mt-1">
+        Bought from {{ item.seller_name or "?" }} for
+        <button type="button" data-edit="purchase_price" class="{{ edit_btn }} text-slate-400">{{ "%.0f"|format(item.purchase_price or 0) }} kr</button>
+        {% if item.status == 'sold' %}
+        · Sold for
+        <button type="button" data-edit="sale" class="{{ edit_btn }} text-slate-400">{{ "%.0f"|format(item.sale_price or 0) }} kr{% if item.sale_date %}, {{ item.sale_date }}{% endif %}</button>
+        {% endif %}
+      </div>
+      <button type="button" data-edit="notes" class="{{ edit_btn }} block max-w-full truncate text-left text-xs mt-1 {% if item.notes %}text-slate-400{% else %}text-slate-600{% endif %}">
+        {{ (item.notes or "").strip().splitlines()[0] if item.notes and item.notes.strip() else "+ Add note" }}
+      </button>
+    </div>
+    <div class="text-right shrink-0">
+      {% set chip_cls = {
+        "sold": "bg-accent/10 text-accent border-accent/30",
+        "listed": "bg-sky-500/10 text-sky-400 border-sky-500/30",
+        "consumed": "bg-slate-700/40 text-slate-400 border-slate-600",
+      }.get(item.status, "bg-amber-500/10 text-amber-400 border-amber-500/30") %}
+      {% if item.status == 'consumed' %}
+      <span class="text-xs px-2 py-1 rounded border {{ chip_cls }}" title="Change this from the item it was used in">{{ item.status_label }}</span>
+      {% else %}
+      <button type="button" data-edit="status" class="text-xs px-2 py-1 rounded border {{ chip_cls }} hover:brightness-125 focus:outline-none focus:ring-1 focus:ring-accent">{{ item.status_label }} ▾</button>
+      {% endif %}
+      {% if item.status == 'sold' %}
+      <div class="text-xs mt-1 {% if item.profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">{{ "%+.0f"|format(item.profit) }} kr</div>
+      {% endif %}
+    </div>
+  </div>
+</div>

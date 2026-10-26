@@ -3,7 +3,7 @@ import time
 import uuid
 import shutil
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import RedirectResponse, StreamingResponse, PlainTextResponse
+from fastapi.responses import RedirectResponse, StreamingResponse, PlainTextResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from typing import List
@@ -33,6 +33,8 @@ templates.env.globals.update(
     accent_hover=config.ACCENT_HOVER,
     bg_color=config.BG_COLOR,
     card_color=config.CARD_COLOR,
+    status_labels=STATUS_LABELS,
+    editable_statuses=EDITABLE_STATUSES,
 )
 
 
@@ -395,7 +397,7 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
 
     return render(request, "items_list.html", items=items, status=status, category=category, q=q or "",
                   sort=sort, sort_options=SORT_OPTIONS, status_tabs=status_tabs, qs=qs, stats=stats,
-                  match_count=match_count)
+                  match_count=match_count, today=date.today().isoformat())
 
 
 def _parse_cost_form(form) -> tuple[dict | None, str | None]:
@@ -472,6 +474,20 @@ def item_new_form(request: Request):
     return render(request, "item_form.html", item=None, error=None, is_edit=False, **FORM_TEMPLATE_CTX)
 
 
+MONEY_FIELDS = {"purchase_price": "Purchase price", "sale_price": "Sale price"}
+
+
+def _parse_money(raw, label: str) -> tuple[float | None, str | None]:
+    """Returns (amount, error). Accepts a comma as the decimal separator."""
+    try:
+        parsed = float(str(raw).replace(",", "."))
+    except ValueError:
+        return None, f"{label} must be a number."
+    if parsed < 0:
+        return None, f"{label} can't be negative."
+    return parsed, None
+
+
 def _parse_item_form(form) -> tuple[dict | None, str | None]:
     """Returns (values, error). If error is set, values is None."""
     values = {f: (form.get(f) or None) for f in FORM_FIELDS}
@@ -479,15 +495,11 @@ def _parse_item_form(form) -> tuple[dict | None, str | None]:
     if not (values["title"] or "").strip():
         return None, "Title is required."
 
-    for money_field, label in (("purchase_price", "Purchase price"), ("sale_price", "Sale price")):
+    for money_field, label in MONEY_FIELDS.items():
         if values[money_field]:
-            try:
-                parsed = float(str(values[money_field]).replace(",", "."))
-            except ValueError:
-                return None, f"{label} must be a number."
-            if parsed < 0:
-                return None, f"{label} can't be negative."
-            values[money_field] = parsed
+            values[money_field], error = _parse_money(values[money_field], label)
+            if error:
+                return None, error
 
     return values, None
 
@@ -692,6 +704,72 @@ async def item_update(request: Request, item_id: int):
                       status_code=400, **FORM_TEMPLATE_CTX)
 
     return RedirectResponse(f"/items/{item_id}", status_code=303)
+
+
+# Fields the items list can edit in place. Anything not sent is left as is --
+# unlike item_update(), which rewrites every column from the full form.
+QUICK_FIELDS = ("status", "purchase_price", "sale_price", "sale_date", "notes")
+
+
+def _render_partial(name: str, **context) -> str:
+    return templates.get_template(name).render(**context)
+
+
+@app.post("/items/{item_id}/quick")
+async def item_quick_update(request: Request, item_id: int):
+    """Inline edit from the items list. Returns JSON: the re-rendered row and
+    stats cards on success, or {"error": ...} with a 4xx status."""
+    form = await request.form()
+    if not auth.check_csrf(request, form):
+        return JSONResponse({"error": "Session expired — reload the page."}, status_code=403)
+
+    updates = {}
+    for field in QUICK_FIELDS:
+        if field not in form:
+            continue
+        raw = (form.get(field) or "").strip()
+        if field in MONEY_FIELDS:
+            updates[field], error = _parse_money(raw, MONEY_FIELDS[field]) if raw else (None, None)
+            if error:
+                return JSONResponse({"error": error}, status_code=400)
+        elif field == "sale_date":
+            try:
+                updates[field] = date.fromisoformat(raw).isoformat() if raw else None
+            except ValueError:
+                return JSONResponse({"error": "Sale date must be YYYY-MM-DD."}, status_code=400)
+        else:
+            updates[field] = raw or None
+    if not updates:
+        return JSONResponse({"error": "Nothing to save."}, status_code=400)
+
+    with database.get_conn() as conn:
+        row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        if row is None:
+            return JSONResponse({"error": "Item not found."}, status_code=404)
+        if "status" in updates:
+            # Same rule as the edit form: "consumed" is only set/cleared by the
+            # consume/undo routes, which keep the target's cost row in sync.
+            if row["status"] == "consumed" or updates["status"] not in EDITABLE_STATUSES:
+                return JSONResponse({"error": "Status can't be changed here."}, status_code=400)
+            if updates["status"] == "sold" and not updates.get("sale_date", row["sale_date"]):
+                updates["sale_date"] = date.today().isoformat()
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE items SET {set_clause} WHERE id = ?", [*updates.values(), item_id])
+
+        row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+        item = row_to_dict(row, get_cost_totals(conn).get(item_id, 0.0))
+        cover = conn.execute(
+            "SELECT thumb_filename FROM item_photos WHERE item_id = ? ORDER BY sort_order, id LIMIT 1", (item_id,)
+        ).fetchone()
+        stats = get_stats(conn)
+    item["cover_photo"] = cover["thumb_filename"] if cover else None
+    item["search_text"] = _search_text(item)
+
+    return JSONResponse({
+        "row": _render_partial("_item_row.html", item=item),
+        "stats": _render_partial("_stats.html", stats=stats),
+    })
 
 
 @app.post("/items/{item_id}/costs")

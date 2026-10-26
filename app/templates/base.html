@@ -80,7 +80,6 @@
 
   if (!list) return;  // other pages: Enter submits to /?q=...
 
-  var rows = list.querySelectorAll('[data-search]');
   var count = document.getElementById('match-count');
   var empty = document.getElementById('no-matches');
 
@@ -89,7 +88,8 @@
     var q = input.value.trim();
     var words = q.toLowerCase().split(/\s+/).filter(Boolean);
     var shown = [];
-    rows.forEach(function (row) {
+    // Queried each time: inline edits swap rows out for re-rendered ones.
+    list.querySelectorAll('[data-search]').forEach(function (row) {
       var text = row.dataset.search;
       row.hidden = !words.every(function (w) { return text.indexOf(w) !== -1; });
       if (!row.hidden) shown.push(row);
@@ -113,11 +113,12 @@
   }
 
   input.addEventListener('input', filter);
+  window.pcflipFilter = filter;  // re-applied by the inline editor after a save
   // Rows are already filtered live, so Enter only acts on a single match.
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var shown = filter();
-    if (shown.length === 1) location.href = shown[0].href;
+    if (shown.length === 1) location.href = shown[0].dataset.href;
   });
 })();
 </script>
