@@ -28,3 +28,6 @@ backups/
 
 # Login credentials + session signing key -- never commit
 data/auth_config.json
+
+# DB snapshots taken before migrations/deploys (see CLAUDE.md)
+data/*.bak

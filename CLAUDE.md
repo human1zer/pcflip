@@ -12,9 +12,11 @@ CDN, no build step). Deployed with Docker Compose.
 
 ## File layout
 
-- `app/main.py` — all routes: dashboard, items CRUD, batch-purchase
-  creation, photo/attachment upload+delete, FINN import, CSV export,
-  login/logout.
+- `app/main.py` — all routes: items list (`/`, with the dashboard stats on
+  top; `/items` is an alias), items CRUD, inline quick-edit
+  (`POST /items/{id}/quick`, JSON), consume/undo (installing parts into a
+  PC), batch-purchase creation, photo/attachment upload+delete, FINN
+  import, CSV export, login/logout.
 - `app/auth.py` — session auth: bcrypt passwords, itsdangerous signed
   cookies, per-IP brute-force lockout, CSRF tokens, `AuthMiddleware`
   gating everything except `/login`, `/health`, `/static`.
@@ -25,7 +27,28 @@ CDN, no build step). Deployed with Docker Compose.
   on-disk cache by finnkode).
 - `app/config.py` — branding/colors, reads `data/auth_config.json`.
 - `app/constants.py` — dropdown values (categories, conditions, etc).
-- `app/templates/` — plain HTML + Tailwind classes, no JS build step.
+- `app/templates/` — plain HTML + Tailwind classes. Still no JS build
+  step: the little JS there is lives in inline `<script>` tags (search +
+  shortcuts in `base.html`, inline editor in `items_list.html`, parts
+  filter in `item_detail.html`). `_item_row.html` / `_stats.html` are
+  partials rendered both by the list page and by `/quick`.
+
+## UI behaviour
+
+- **Search** (header, every page): on `/` it filters rows in place as you
+  type; elsewhere Enter goes to `/?q=`. Every word must appear somewhere
+  in `SEARCH_FIELDS` (title, serial, category, notes, seller, buyer, FINN
+  IDs) or the status/label.
+- **Parts panel** on Desktop PC / Laptop pages (`PC_CATEGORIES`): lists
+  in-stock/listed non-PC items; "+ Add" posts to the existing
+  `/items/{part}/consume`, "Remove" to `/consume/undo`, both with
+  `next=` to come back to the PC.
+- **Inline edit** on the list: status, purchase price, sale price/date,
+  notes. Mouse-picking a non-sold status saves immediately; "Sold" asks
+  for price/date first (date defaults to today).
+- **Shortcuts:** `/` focus search, `n` new item (both ignored while typing
+  in a field), Enter saves / opens the single search match, Esc
+  cancels/clears. Only deletes ask for `confirm()`; undo/remove don't.
 
 ## Rebuild and logs
 
@@ -65,6 +88,26 @@ docker compose logs -f
   `.get_text()` / `.strings` / `.text` silently return `''` for
   everything inside it. Use `tag.find_all(string=True, recursive=True)`
   instead when parsing a FINN listing page.
+
+- Don't send a partial form to `POST /items/{id}/edit`: `_parse_item_form`
+  rewrites every column in `FORM_FIELDS` and sets missing ones to NULL.
+  For single-field changes use `/quick`, which only touches
+  `QUICK_FIELDS` that are actually sent.
+- The search rule exists twice — `items_list()` in `main.py` and
+  `filter()` in `base.html` — keep them in sync. The server renders
+  non-matching rows `hidden` rather than dropping them, so the in-page
+  filter can widen the search again; rows use `[data-search]` /
+  `data-href`.
+- `[hidden]` needs the `display: none !important` rule in `base.html`;
+  Tailwind's `.block`/`.flex` would otherwise win and show hidden rows.
+- `consumed` status is only set/cleared by the consume/undo routes (they
+  keep the target's cost row in sync). `/quick` and the edit form both
+  refuse to change it.
+- Any redirect target taken from a form must go through `_safe_next()`
+  (local paths only — no `//host` or `/\host`).
+- JS `fetch` POSTs still need CSRF: send `csrf_token` in the form body
+  (the list exposes it as `data-csrf` on `#items-list`). An expired
+  session comes back as a redirect to `/login` (HTML, not JSON).
 
 ## Data safety
 
