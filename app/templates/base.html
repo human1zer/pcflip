@@ -34,7 +34,7 @@
        filters the rows in place as you type instead of submitting. #}
     <form id="global-search" method="get" action="/" role="search" class="order-last w-full sm:order-none sm:w-auto sm:flex-1">
       <input type="search" name="q" value="{{ q or '' }}" autocomplete="off"
-        placeholder="Search name, specs, status, FINN ID…  ( / )"
+        placeholder="Search name, specs, status, FINN ID…  ( / )" title="/ to search · n for a new item"
         class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm">
     </form>
     <nav class="flex items-center gap-4 text-sm text-slate-300">
@@ -52,7 +52,7 @@
   {% block content %}{% endblock %}
 </main>
 
-<a href="/items/new" class="fixed bottom-5 right-5 bg-accent hover:opacity-90 text-slate-950 font-bold w-14 h-14 rounded-full flex items-center justify-center text-3xl shadow-lg shadow-accent/20">+</a>
+<a href="/items/new" title="New item (n)" aria-label="New item" class="fixed bottom-5 right-5 bg-accent hover:opacity-90 text-slate-950 font-bold w-14 h-14 rounded-full flex items-center justify-center text-3xl shadow-lg shadow-accent/20">+</a>
 
 <script>
 (function () {
@@ -64,12 +64,16 @@
     return el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
   }
 
-  // "/" focuses search from anywhere; Esc clears it, then leaves it.
+  // "/" focuses search from anywhere, "n" opens a new item; Esc clears the
+  // search, then leaves it. Ignored while typing in a field.
   document.addEventListener('keydown', function (e) {
-    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(document.activeElement)) {
+    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(document.activeElement)) return;
+    if (e.key === '/') {
       e.preventDefault();
       input.focus();
       input.select();
+    } else if (e.key === 'n' && location.pathname !== '/items/new') {
+      location.href = '/items/new';
     }
   });
   input.addEventListener('keydown', function (e) {

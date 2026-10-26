@@ -36,7 +36,7 @@
     <a href="/items/{{ consumed_into.target_item_id }}" class="text-accent underline">{{ consumed_into.target_title }}</a>
     ({{ "%.0f"|format(consumed_into.amount) }} kr)
   </span>
-  <form method="post" action="/items/{{ item.id }}/consume/undo" onsubmit="return confirm('Undo this and restore the item to in stock?');">
+  <form method="post" action="/items/{{ item.id }}/consume/undo">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="text-sm border border-slate-700 rounded-lg px-3 py-1.5 text-slate-300 hover:border-accent">Undo</button>
   </form>
@@ -184,7 +184,7 @@
       <div class="flex items-center gap-3 shrink-0">
         <span class="text-red-400 font-medium">-{{ "%.0f"|format(c.amount) }} kr</span>
         {% if c.source_item_id %}
-        <form method="post" action="/items/{{ c.source_item_id }}/consume/undo" onsubmit="return confirm('Undo this and restore that item to in stock?');">
+        <form method="post" action="/items/{{ c.source_item_id }}/consume/undo">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="next" value="/items/{{ item.id }}">
           <button type="submit" class="text-sm border border-slate-700 rounded-lg px-2 py-1 text-slate-300 hover:border-accent">Undo</button>
@@ -218,7 +218,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label class="block text-sm text-slate-400 mb-2">Mark this item as used in another item</label>
     <div class="flex gap-2">
-      <select name="target_item_id" required class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+      <select name="target_item_id" required class="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
         <option value="">Choose an item…</option>
         {% for t in consume_targets %}
         <option value="{{ t.id }}">{{ t.title }}</option>
@@ -263,7 +263,7 @@
     <label class="block text-sm text-slate-400 mb-2">Add photos (you can select multiple at once)</label>
     <div class="flex gap-2">
       <input type="file" name="files" accept="image/*,.avif" multiple capture="environment"
-        class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
+        class="flex-1 min-w-0 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
       <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
     </div>
   </form>
@@ -301,7 +301,7 @@
     <label class="block text-sm text-slate-400 mb-2">Add receipt (PDF or photo)</label>
     <div class="flex gap-2">
       <input type="file" name="files" accept="image/*,.avif,application/pdf" multiple
-        class="flex-1 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
+        class="flex-1 min-w-0 text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-slate-800 file:text-slate-200">
       <button type="submit" class="bg-accent hover:opacity-90 text-slate-950 font-semibold px-4 rounded-lg">Upload</button>
     </div>
   </form>
