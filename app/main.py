@@ -323,6 +323,7 @@ SORT_OPTIONS = {
     "price_asc": ("Price: low to high", lambda i: i["purchase_price"] if i["purchase_price"] is not None else float("inf"), False),
     "profit_desc": ("Profit: high to low", lambda i: i["profit"], True),
 }
+PC_CATEGORIES = ("Desktop PC", "Laptop")
 STATUS_TABS = [(None, "All"), ("in_stock", "In stock"), ("listed", "Listed"), ("sold", "Sold"), ("consumed", "Consumed")]
 
 
@@ -635,10 +636,24 @@ def item_detail(request: Request, item_id: int):
                     (item_id,),
                 ).fetchall()
             ]
+        # PCs/laptops get a searchable list of in-stock parts to install
+        # (consume) into them straight from their own page.
+        available_parts = []
+        if row["category"] in PC_CATEGORIES and row["status"] in ("in_stock", "listed"):
+            placeholders = ", ".join("?" for _ in PC_CATEGORIES)
+            part_rows = conn.execute(
+                f"""SELECT * FROM items WHERE status IN ('in_stock', 'listed') AND id != ?
+                    AND COALESCE(category, '') NOT IN ({placeholders}) ORDER BY category, title""",
+                (item_id, *PC_CATEGORIES),
+            ).fetchall()
+            available_parts = [row_to_dict(r) for r in part_rows]
+            for part in available_parts:
+                part["search_text"] = _search_text(part)
     item = row_to_dict(row, cost_total)
     return render(request, "item_detail.html", item=item, photos=photos, attachments=attachments,
                   costs=costs, today=date.today().isoformat(),
-                  consumed_into=consumed_into, consume_targets=consume_targets)
+                  consumed_into=consumed_into, consume_targets=consume_targets,
+                  is_pc=row["category"] in PC_CATEGORIES, available_parts=available_parts)
 
 
 @app.get("/items/{item_id}/edit")
@@ -716,18 +731,28 @@ async def item_cost_delete(request: Request, item_id: int, cost_id: int):
     return RedirectResponse(f"/items/{item_id}", status_code=303)
 
 
+def _safe_next(form, default: str) -> str:
+    """The form's `next` path to redirect back to, if it's a local one --
+    never an absolute or protocol-relative URL (//evil.com, /\\evil.com)."""
+    nxt = form.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//") and "\\" not in nxt:
+        return nxt
+    return default
+
+
 @app.post("/items/{item_id}/consume")
 async def item_consume(request: Request, item_id: int):
     form = await request.form()
     if not auth.check_csrf(request, form):
         return RedirectResponse("/login", status_code=303)
+    back = _safe_next(form, f"/items/{item_id}")
 
     try:
         target_id = int(form.get("target_item_id") or "")
     except ValueError:
-        return RedirectResponse(f"/items/{item_id}", status_code=303)
+        return RedirectResponse(back, status_code=303)
     if target_id == item_id:
-        return RedirectResponse(f"/items/{item_id}", status_code=303)
+        return RedirectResponse(back, status_code=303)
 
     with database.get_conn() as conn:
         source = conn.execute("SELECT * FROM items WHERE id = ? AND status IN ('in_stock', 'listed')",
@@ -735,7 +760,7 @@ async def item_consume(request: Request, item_id: int):
         target = conn.execute("SELECT * FROM items WHERE id = ? AND status IN ('in_stock', 'listed')",
                                (target_id,)).fetchone()
         if not source or not target:
-            return RedirectResponse(f"/items/{item_id}", status_code=303)
+            return RedirectResponse(back, status_code=303)
 
         conn.execute(
             "INSERT INTO costs (item_id, label, amount, source_item_id) VALUES (?, ?, ?, ?)",
@@ -743,7 +768,7 @@ async def item_consume(request: Request, item_id: int):
         )
         conn.execute("UPDATE items SET status = 'consumed' WHERE id = ?", (item_id,))
 
-    return RedirectResponse(f"/items/{item_id}", status_code=303)
+    return RedirectResponse(back, status_code=303)
 
 
 @app.post("/items/{item_id}/consume/undo")
@@ -751,10 +776,11 @@ async def item_consume_undo(request: Request, item_id: int):
     form = await request.form()
     if not auth.check_csrf(request, form):
         return RedirectResponse("/login", status_code=303)
+    back = _safe_next(form, f"/items/{item_id}")
     with database.get_conn() as conn:
         conn.execute("DELETE FROM costs WHERE source_item_id = ?", (item_id,))
         conn.execute("UPDATE items SET status = 'in_stock' WHERE id = ? AND status = 'consumed'", (item_id,))
-    return RedirectResponse(f"/items/{item_id}", status_code=303)
+    return RedirectResponse(back, status_code=303)
 
 
 @app.post("/items/{item_id}/photos")

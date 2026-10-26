@@ -80,6 +80,90 @@
   </section>
 </div>
 
+{% if is_pc %}
+{% set installed = costs|selectattr("source_item_id")|list %}
+<section id="parts" class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
+  <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-3">Parts {% if installed %}({{ installed|length }}){% endif %}</h2>
+
+  {% if installed %}
+  <div class="space-y-2 mb-4">
+    {% for c in installed %}
+    <div class="flex items-center justify-between gap-3 bg-slate-800/50 border border-slate-800 rounded-lg px-3 py-2">
+      <a href="/items/{{ c.source_item_id }}" class="min-w-0 truncate text-sm hover:text-accent">{{ c.source_title or c.label }}</a>
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="text-sm text-slate-400">{{ "%.0f"|format(c.amount) }} kr</span>
+        {# Removing is one click, no confirm -- it's undone just as easily by adding the part again. #}
+        <form method="post" action="/items/{{ c.source_item_id }}/consume/undo">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/items/{{ item.id }}#parts">
+          <button type="submit" class="text-sm border border-slate-700 rounded-lg px-2 py-1 text-slate-300 hover:border-red-400 hover:text-red-400">Remove</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% elif not available_parts %}
+  <p class="text-slate-500 text-sm">No parts installed.</p>
+  {% endif %}
+
+  {% if available_parts %}
+  <input id="part-filter" type="search" autocomplete="off" placeholder="Find a part in stock (RAM, SSD…) — Enter adds a single match"
+    class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm mb-2">
+  <div id="part-list" class="max-h-72 overflow-y-auto space-y-1">
+    {% for p in available_parts %}
+    <form method="post" action="/items/{{ p.id }}/consume" data-search="{{ p.search_text }}"
+      class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 hover:bg-slate-800/60">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="target_item_id" value="{{ item.id }}">
+      <input type="hidden" name="next" value="/items/{{ item.id }}#parts">
+      <div class="min-w-0">
+        <div class="text-sm truncate">{{ p.title }}</div>
+        <div class="text-xs text-slate-500">{{ p.category or "Uncategorized" }} · {{ "%.0f"|format(p.purchase_price or 0) }} kr</div>
+      </div>
+      <button type="submit" class="shrink-0 text-sm bg-slate-700 hover:bg-accent hover:text-slate-950 rounded-lg px-3 py-1 font-semibold">+ Add</button>
+    </form>
+    {% endfor %}
+    <p id="part-none" class="text-sm text-slate-500 px-3 py-2" hidden>No matching parts in stock.</p>
+  </div>
+  <script>
+  (function () {
+    var input = document.getElementById('part-filter');
+    var rows = document.querySelectorAll('#part-list [data-search]');
+    var none = document.getElementById('part-none');
+    // Same matching rule as the main search: every word must appear somewhere.
+    function filter() {
+      var words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      var shown = [];
+      rows.forEach(function (row) {
+        row.hidden = !words.every(function (w) { return row.dataset.search.indexOf(w) !== -1; });
+        if (!row.hidden) shown.push(row);
+      });
+      none.hidden = shown.length > 0;
+      return shown;
+    }
+    input.addEventListener('input', filter);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        var shown = filter();
+        if (shown.length === 1) shown[0].requestSubmit();
+      } else if (e.key === 'Escape') {
+        if (input.value) { input.value = ''; filter(); } else input.blur();
+      }
+    });
+    // Back here after adding/removing a part: ready to add the next one.
+    // On load, not now -- the browser's own scroll-to-#parts would undo it.
+    if (location.hash === '#parts') {
+      window.addEventListener('load', function () { input.focus({ preventScroll: true }); });
+    }
+  })();
+  </script>
+  {% elif item.status in ('in_stock', 'listed') %}
+  <p class="text-slate-500 text-sm">No parts in stock to add.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="bg-card border border-slate-800 rounded-xl p-4 mb-4">
   <h2 class="font-semibold text-slate-400 text-sm uppercase tracking-wide mb-3">Costs {% if costs %}({{ costs|length }}){% endif %}</h2>
 
@@ -102,6 +186,7 @@
         {% if c.source_item_id %}
         <form method="post" action="/items/{{ c.source_item_id }}/consume/undo" onsubmit="return confirm('Undo this and restore that item to in stock?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/items/{{ item.id }}">
           <button type="submit" class="text-sm border border-slate-700 rounded-lg px-2 py-1 text-slate-300 hover:border-accent">Undo</button>
         </form>
         {% else %}
