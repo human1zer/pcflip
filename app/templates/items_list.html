@@ -2,50 +2,60 @@
 {% block title %}Items - {{ app_name }}{% endblock %}
 {% block content %}
 
-<div class="flex items-center justify-between mb-4">
-  <h1 class="text-xl font-semibold">Items</h1>
-  <a href="/export.csv" class="text-sm text-slate-400 hover:text-accent border border-slate-700 rounded-lg px-3 py-1.5">Export CSV</a>
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">In stock</div>
+    <div class="text-2xl font-bold mt-1">{{ stats.in_stock_count }}</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">Sold</div>
+    <div class="text-2xl font-bold mt-1">{{ stats.sold_count }}</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide">Invested</div>
+    <div class="text-2xl font-bold mt-1">{{ "%.0f"|format(stats.total_invested) }} kr</div>
+  </div>
+  <div class="bg-card border border-slate-800 rounded-xl p-4">
+    <div class="text-slate-400 text-xs uppercase tracking-wide mb-1">Profit</div>
+    <div class="flex justify-between text-xs text-slate-400"><span>Item profit</span><span>{{ "%+.0f"|format(stats.total_profit) }}</span></div>
+    <div class="flex justify-between text-xs text-slate-400"><span>General exp.</span><span>{{ "%+.0f"|format(-stats.general_expenses) }}</span></div>
+    <div class="flex justify-between text-sm font-bold mt-1 pt-1 border-t border-slate-800 {% if stats.net_profit >= 0 %}text-accent{% else %}text-red-400{% endif %}">
+      <span>Net</span><span>{{ "%+.0f"|format(stats.net_profit) }}</span>
+    </div>
+  </div>
 </div>
 
-<form method="get" action="/items" class="mb-4 space-y-2">
-  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
-  <div class="flex gap-2">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search title, serial, seller, buyer, notes, category..."
-      class="flex-1 bg-card border border-slate-700 rounded-lg px-3 py-2 text-sm">
-    <button type="submit" class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm">Search</button>
-    {% if q %}<a href="/items{{ qs(q=None) }}" class="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-400">Clear</a>{% endif %}
+<div class="flex items-center justify-between gap-2 mb-4">
+  <div class="flex gap-2 overflow-x-auto text-sm">
+    {% for tab in status_tabs %}
+    <a href="{{ tab.href }}" data-keep-q class="px-3 py-1.5 rounded-full border whitespace-nowrap {% if tab.active %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">{{ tab.label }}</a>
+    {% endfor %}
   </div>
-  <div class="flex gap-2">
-    <select name="category" onchange="this.form.submit()"
-      class="flex-1 bg-card border border-slate-700 rounded-lg px-2 py-2 text-sm">
-      <option value="">All categories</option>
-      {% for c in categories %}
-      <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    <select name="sort" onchange="this.form.submit()"
-      class="flex-1 bg-card border border-slate-700 rounded-lg px-2 py-2 text-sm">
+  <a href="/export.csv" class="shrink-0 text-sm text-slate-400 hover:text-accent border border-slate-700 rounded-lg px-3 py-1.5">Export CSV</a>
+</div>
+
+{% set suffix = (" in " ~ category) if category else "" %}
+<div class="flex items-center justify-between gap-2 mb-3">
+  <p id="match-count" data-suffix="{{ suffix }}" class="text-sm text-slate-400">
+    {{ match_count }} item{{ "s" if match_count != 1 else "" }}{% if q %} matching "{{ q }}"{% endif %}{{ suffix }}
+  </p>
+  <form method="get" action="/">
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    <input type="hidden" id="sort-q" name="q" value="{{ q }}">
+    <select name="sort" onchange="this.form.submit()" aria-label="Sort"
+      class="bg-card border border-slate-700 rounded-lg px-2 py-1.5 text-sm">
       {% for key, opt in sort_options.items() %}
       <option value="{{ key }}" {% if sort == key %}selected{% endif %}>{{ opt[0] }}</option>
       {% endfor %}
     </select>
-  </div>
-</form>
-
-<div class="flex gap-2 mb-4 overflow-x-auto text-sm">
-  {% for tab in status_tabs %}
-  <a href="{{ tab.href }}" class="px-3 py-1.5 rounded-full border whitespace-nowrap {% if tab.active %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">{{ tab.label }}</a>
-  {% endfor %}
+  </form>
 </div>
 
-<p class="text-sm text-slate-400 mb-3">
-  {{ items|length }} item{{ "s" if items|length != 1 else "" }}{% if q %} matching "{{ q }}"{% endif %}{% if category %} in {{ category }}{% endif %}
-</p>
-
-{% if items %}
-<div class="space-y-2">
+<div id="items-list" class="space-y-2">
   {% for item in items %}
-  <a href="/items/{{ item.id }}" class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
+  <a href="/items/{{ item.id }}" data-search="{{ item.search_text }}" {% if item.search_hidden %}hidden{% endif %}
+    class="block bg-card border border-slate-800 rounded-lg p-3 hover:border-accent">
     <div class="flex justify-between items-start gap-3">
       {% if item.cover_photo %}
       <img src="/photos/{{ item.cover_photo }}" loading="lazy" class="w-14 h-14 object-cover rounded-lg border border-slate-800 shrink-0">
@@ -76,8 +86,6 @@
   </a>
   {% endfor %}
 </div>
-{% else %}
-<p class="text-slate-500">No items found.</p>
-{% endif %}
+<p id="no-matches" class="text-slate-500" {% if match_count %}hidden{% endif %}>No items found.</p>
 
 {% endblock %}

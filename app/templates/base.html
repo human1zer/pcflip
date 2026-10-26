@@ -21,16 +21,24 @@
 <style>
   body { -webkit-tap-highlight-color: transparent; }
   input, select, textarea { font-size: 16px; } /* prevent iOS zoom */
+  /* Tailwind's display utilities (e.g. .block) would otherwise beat [hidden]. */
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body class="bg-page text-slate-100 min-h-screen pb-24">
 
 <header class="bg-card border-b border-slate-800 sticky top-0 z-10">
-  <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+  <div class="max-w-4xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
     <a href="/" class="font-bold text-lg tracking-tight text-accent">{{ app_name }}</a>
+    {# Searches from any page. On the items list (/), base.html's script
+       filters the rows in place as you type instead of submitting. #}
+    <form id="global-search" method="get" action="/" role="search" class="order-last w-full sm:order-none sm:w-auto sm:flex-1">
+      <input type="search" name="q" value="{{ q or '' }}" autocomplete="off"
+        placeholder="Search name, specs, status, FINN ID…  ( / )"
+        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm">
+    </form>
     <nav class="flex items-center gap-4 text-sm text-slate-300">
-      <a href="/" class="hover:text-accent">Dashboard</a>
-      <a href="/items" class="hover:text-accent">Items</a>
+      <a href="/" class="hover:text-accent">Items</a>
       <a href="/expenses" class="hover:text-accent">Expenses</a>
       <form method="post" action="/logout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -45,6 +53,74 @@
 </main>
 
 <a href="/items/new" class="fixed bottom-5 right-5 bg-accent hover:opacity-90 text-slate-950 font-bold w-14 h-14 rounded-full flex items-center justify-center text-3xl shadow-lg shadow-accent/20">+</a>
+
+<script>
+(function () {
+  var form = document.getElementById('global-search');
+  var input = form.elements.q;
+  var list = document.getElementById('items-list');
+
+  function isTyping(el) {
+    return el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  }
+
+  // "/" focuses search from anywhere; Esc clears it, then leaves it.
+  document.addEventListener('keydown', function (e) {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(document.activeElement)) {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+  input.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (input.value) { input.value = ''; if (list) filter(); }
+    else input.blur();
+  });
+
+  if (!list) return;  // other pages: Enter submits to /?q=...
+
+  var rows = list.querySelectorAll('[data-search]');
+  var count = document.getElementById('match-count');
+  var empty = document.getElementById('no-matches');
+
+  // Same rule as items_list() in main.py: every word must appear somewhere.
+  function filter() {
+    var q = input.value.trim();
+    var words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    var shown = [];
+    rows.forEach(function (row) {
+      var text = row.dataset.search;
+      row.hidden = !words.every(function (w) { return text.indexOf(w) !== -1; });
+      if (!row.hidden) shown.push(row);
+    });
+    count.textContent = shown.length + ' item' + (shown.length === 1 ? '' : 's') +
+      (q ? ' matching "' + q + '"' : '') + (count.dataset.suffix || '');
+    empty.hidden = shown.length > 0;
+
+    // Keep the query in the URL, status tabs, and sort form, so reloading or
+    // switching tab/sort doesn't lose it.
+    function withQ(href) {
+      var url = new URL(href, location.href);
+      if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
+      return url.pathname + url.search;
+    }
+    history.replaceState(null, '', withQ(location.href));
+    document.querySelectorAll('[data-keep-q]').forEach(function (a) { a.href = withQ(a.href); });
+    var sortQ = document.getElementById('sort-q');
+    if (sortQ) sortQ.value = q;
+    return shown;
+  }
+
+  input.addEventListener('input', filter);
+  // Rows are already filtered live, so Enter only acts on a single match.
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var shown = filter();
+    if (shown.length === 1) location.href = shown[0].href;
+  });
+})();
+</script>
 
 </body>
 </html>

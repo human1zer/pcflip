@@ -287,14 +287,13 @@ FORM_FIELDS = [
 ]
 
 
-@app.get("/")
-def dashboard(request: Request):
-    with database.get_conn() as conn:
-        rows = conn.execute("SELECT * FROM items").fetchall()
-        cost_totals = get_cost_totals(conn)
-        general_expenses = conn.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM costs WHERE item_id IS NULL"
-        ).fetchone()[0]
+def get_stats(conn) -> dict:
+    """Totals across every item, shown above the items list."""
+    rows = conn.execute("SELECT * FROM items").fetchall()
+    cost_totals = get_cost_totals(conn)
+    general_expenses = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM costs WHERE item_id IS NULL"
+    ).fetchone()[0]
     items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
 
     in_stock = [i for i in items if i["status"] in ("in_stock", "listed")]
@@ -304,7 +303,7 @@ def dashboard(request: Request):
     # from total_invested below, so their purchase price is never counted twice.
 
     total_profit = sum(i["profit"] for i in sold)
-    stats = {
+    return {
         "in_stock_count": len(in_stock),
         "sold_count": len(sold),
         "total_invested": sum(i["purchase_price"] or 0 for i in items if i["status"] != "consumed"),
@@ -313,14 +312,6 @@ def dashboard(request: Request):
         "general_expenses": general_expenses,
         "net_profit": total_profit - general_expenses,
     }
-
-    recent_sales = sorted(sold, key=lambda i: i["sale_date"] or "", reverse=True)[:5]
-
-    return render(request, "dashboard.html",
-        stats=stats,
-        in_stock_items=in_stock[:8],
-        recent_sales=recent_sales,
-    )
 
 
 SORT_OPTIONS = {
@@ -335,6 +326,20 @@ SORT_OPTIONS = {
 STATUS_TABS = [(None, "All"), ("in_stock", "In stock"), ("listed", "Listed"), ("sold", "Sold"), ("consumed", "Consumed")]
 
 
+# Columns the search box matches against, both server-side (the ?q= query)
+# and client-side (each row's data-search text in items_list.html).
+SEARCH_FIELDS = [
+    "title", "serial_number", "category", "notes", "seller_name", "buyer_name",
+    "purchase_tracking", "sale_tracking",  # FINN IDs
+]
+
+
+def _search_text(item) -> str:
+    parts = [item.get(f) for f in SEARCH_FIELDS] + [item["status"], item["status_label"]]
+    return " ".join(str(p) for p in parts if p).lower()
+
+
+@app.get("/")
 @app.get("/items")
 def items_list(request: Request, status: str = None, category: str = None, q: str = None, sort: str = "newest"):
     if sort not in SORT_OPTIONS:
@@ -348,22 +353,30 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
     if category:
         query += " AND category = ?"
         params.append(category)
-    if q:
-        query += """ AND (title LIKE ? OR serial_number LIKE ? OR seller_name LIKE ?
-                           OR buyer_name LIKE ? OR notes LIKE ? OR category LIKE ?)"""
-        like = f"%{q}%"
-        params += [like] * 6
 
     with database.get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
         cost_totals = get_cost_totals(conn)
-        items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
-        for item in items:
-            cover = conn.execute(
-                "SELECT thumb_filename FROM item_photos WHERE item_id = ? ORDER BY sort_order, id LIMIT 1",
-                (item["id"],),
-            ).fetchone()
-            item["cover_photo"] = cover["thumb_filename"] if cover else None
+        covers = {
+            r["item_id"]: r["thumb_filename"] for r in conn.execute(
+                """
+                SELECT p.item_id, p.thumb_filename FROM item_photos AS p
+                WHERE p.id = (SELECT id FROM item_photos WHERE item_id = p.item_id ORDER BY sort_order, id LIMIT 1)
+                """
+            ).fetchall()
+        }
+        stats = get_stats(conn)
+    # Search doesn't drop rows -- non-matches are rendered hidden, so the
+    # in-page filter can widen the search again as the query is edited. Every
+    # whitespace-separated word must appear somewhere, same rule as the JS in
+    # base.html, so "ddr4 16gb" finds an item with both words anywhere.
+    words = (q or "").lower().split()
+    items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
+    for item in items:
+        item["cover_photo"] = covers.get(item["id"])
+        item["search_text"] = _search_text(item)
+        item["search_hidden"] = not all(w in item["search_text"] for w in words)
+    match_count = sum(not i["search_hidden"] for i in items)
 
     _, sort_key, sort_reverse = SORT_OPTIONS[sort]
     items.sort(key=sort_key, reverse=sort_reverse)
@@ -375,12 +388,13 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
         return f"?{urlencode(params)}" if params else ""
 
     status_tabs = [
-        {"value": value, "label": label, "href": f"/items{qs(status=value)}", "active": status == value}
+        {"value": value, "label": label, "href": f"/{qs(status=value)}", "active": status == value}
         for value, label in STATUS_TABS
     ]
 
     return render(request, "items_list.html", items=items, status=status, category=category, q=q or "",
-                  sort=sort, sort_options=SORT_OPTIONS, status_tabs=status_tabs, categories=CATEGORIES, qs=qs)
+                  sort=sort, sort_options=SORT_OPTIONS, status_tabs=status_tabs, qs=qs, stats=stats,
+                  match_count=match_count)
 
 
 def _parse_cost_form(form) -> tuple[dict | None, str | None]:
@@ -607,7 +621,7 @@ def item_detail(request: Request, item_id: int):
     with database.get_conn() as conn:
         row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
         if row is None:
-            return RedirectResponse("/items", status_code=303)
+            return RedirectResponse("/", status_code=303)
         photos = get_photos(conn, item_id)
         attachments = get_attachments(conn, item_id)
         costs = get_costs(conn, item_id)
@@ -632,7 +646,7 @@ def item_edit_form(request: Request, item_id: int):
     with database.get_conn() as conn:
         row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
     if row is None:
-        return RedirectResponse("/items", status_code=303)
+        return RedirectResponse("/", status_code=303)
     item = row_to_dict(row)
     return render(request, "item_form.html", item=item, error=None, is_edit=True, **FORM_TEMPLATE_CTX)
 
@@ -854,7 +868,7 @@ async def item_delete(request: Request, item_id: int):
         item_dir = os.path.join(base_dir, str(item_id))
         if os.path.isdir(item_dir) and not os.listdir(item_dir):
             shutil.rmtree(item_dir, ignore_errors=True)
-    return RedirectResponse("/items", status_code=303)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/export.csv")
