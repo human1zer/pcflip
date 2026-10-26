@@ -22,3 +22,9 @@ venv/
 .DS_Store
 backup.log
 data/finn_cache/
+
+# Local backup snapshots (contain DB + auth_config.json copies)
+backups/
+
+# Login credentials + session signing key -- never commit
+data/auth_config.json
