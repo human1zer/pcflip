@@ -121,7 +121,7 @@ mirror) — a consistent `sqlite3 .backup` of the database plus the
 photos/attachments folders, hardlinked against the previous snapshot so
 unchanged files don't use extra disk space. That way, if a DB gets
 corrupted or you delete an item by mistake, you can still recover an
-earlier day's snapshot instead of the backup just mirroring the mistake.
+earlier snapshot (one per hour) instead of the backup just mirroring the mistake.
 Snapshots older than 30 days are pruned automatically (`RETENTION_DAYS`
 at the top of the script).
 
@@ -132,8 +132,8 @@ up a cron job:
 ```bash
 chmod +x backup.sh
 crontab -e
-# add this line to back up every night at 3am:
-0 3 * * * /home/human1zer/pcflip/backup.sh
+# add this line to back up every hour, on the hour:
+0 * * * * /home/human1zer/migration/pcflip/backup.sh
 ```
 
 To restore: pick a folder under `$DEST_ROOT/snapshots/`, copy `pcflip.db`
