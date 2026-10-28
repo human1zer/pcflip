@@ -3,11 +3,11 @@
    the item; the [data-edit] buttons open the inline editor instead. #}
 {% set edit_btn = "rounded px-1 -mx-1 border border-transparent hover:border-slate-600 hover:text-slate-200 focus:outline-none focus:border-accent" %}
 <div class="bg-card border border-slate-800 rounded-lg p-3 transition-colors"
-  data-search="{{ item.search_text }}" data-href="/items/{{ item.id }}" data-id="{{ item.id }}"
+  data-search="{{ item.search_text }}" data-category="{{ item.chip_category }}" data-href="/items/{{ item.id }}" data-id="{{ item.id }}"
   data-status="{{ item.status }}" data-purchase-price="{{ '%g'|format(item.purchase_price) if item.purchase_price is not none else '' }}"
   data-sale-price="{{ '%g'|format(item.sale_price) if item.sale_price is not none else '' }}"
   data-sale-date="{{ item.sale_date or '' }}" data-notes="{{ item.notes or '' }}"
-  {% if item.search_hidden %}hidden{% endif %}>
+  {% if item.search_hidden or item.category_hidden %}hidden{% endif %}>
   <div class="flex justify-between items-start gap-3">
     <a href="/items/{{ item.id }}" class="shrink-0" tabindex="-1">
       {% if item.cover_photo %}

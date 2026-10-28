@@ -86,35 +86,65 @@
 
   var count = document.getElementById('match-count');
   var empty = document.getElementById('no-matches');
+  var chips = document.getElementById('category-chips');
 
-  // Same rule as items_list() in main.py: every word must appear somewhere.
+  // Same rule as items_list() in main.py: every word must appear somewhere,
+  // and the row must be in the active category chip (list's data-category).
   function filter() {
     var q = input.value.trim();
     var words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    var category = list.dataset.category;
     var shown = [];
+    var perCategory = {};  // search matches per category, for the chip counts
+    var matched = 0;
     // Queried each time: inline edits swap rows out for re-rendered ones.
     list.querySelectorAll('[data-search]').forEach(function (row) {
       var text = row.dataset.search;
-      row.hidden = !words.every(function (w) { return text.indexOf(w) !== -1; });
+      var match = words.every(function (w) { return text.indexOf(w) !== -1; });
+      if (match) { matched++; perCategory[row.dataset.category] = (perCategory[row.dataset.category] || 0) + 1; }
+      row.hidden = !match || (category && row.dataset.category !== category);
       if (!row.hidden) shown.push(row);
     });
     count.textContent = shown.length + ' item' + (shown.length === 1 ? '' : 's') +
-      (q ? ' matching "' + q + '"' : '') + (count.dataset.suffix || '');
+      (q ? ' matching "' + q + '"' : '') + (category ? ' in ' + category : '');
     empty.hidden = shown.length > 0;
+    if (chips) chips.querySelectorAll('[data-chip]').forEach(function (chip) {
+      var value = chip.dataset.chip;
+      chip.querySelector('[data-chip-count]').textContent = value ? (perCategory[value] || 0) : matched;
+      var on = value === category;
+      chip.classList.remove.apply(chip.classList, (on ? chips.dataset.off : chips.dataset.on).split(' '));
+      chip.classList.add.apply(chip.classList, (on ? chips.dataset.on : chips.dataset.off).split(' '));
+    });
 
-    // Keep the query in the URL, status tabs, and sort form, so reloading or
-    // switching tab/sort doesn't lose it.
-    function withQ(href) {
+    // Keep the query (and category) in the URL, status tabs, chips, and sort
+    // form, so reloading or switching tab/sort doesn't lose it. Chips keep
+    // their own category, so they only get the query.
+    function withQ(href, keepCategory) {
       var url = new URL(href, location.href);
       if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
+      if (keepCategory) {
+        if (category) url.searchParams.set('category', category); else url.searchParams.delete('category');
+      }
       return url.pathname + url.search;
     }
-    history.replaceState(null, '', withQ(location.href));
-    document.querySelectorAll('[data-keep-q]').forEach(function (a) { a.href = withQ(a.href); });
+    history.replaceState(null, '', withQ(location.href, true));
+    document.querySelectorAll('[data-keep-q]').forEach(function (a) { a.href = withQ(a.href, 'keepCategory' in a.dataset); });
     var sortQ = document.getElementById('sort-q');
     if (sortQ) sortQ.value = q;
+    var sortCategory = document.getElementById('sort-category');
+    if (sortCategory) { sortCategory.value = category; sortCategory.disabled = !category; }
     return shown;
   }
+
+  // Category chips switch in place, like typing in the search box; a
+  // modified click (new tab) still follows the link.
+  if (chips) chips.addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-chip]');
+    if (!chip || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    list.dataset.category = chip.dataset.chip;
+    filter();
+  });
 
   input.addEventListener('input', filter);
   window.pcflipFilter = filter;  // re-applied by the inline editor after a save

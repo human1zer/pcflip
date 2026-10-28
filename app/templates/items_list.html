@@ -7,20 +7,32 @@
 <div class="flex items-center justify-between gap-2 mb-4">
   <div class="flex gap-2 overflow-x-auto text-sm">
     {% for tab in status_tabs %}
-    <a href="{{ tab.href }}" data-keep-q class="px-3 py-1.5 rounded-full border whitespace-nowrap {% if tab.active %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">{{ tab.label }}</a>
+    <a href="{{ tab.href }}" data-keep-q data-keep-category class="px-3 py-1.5 rounded-full border whitespace-nowrap {% if tab.active %}bg-accent text-slate-950 border-accent{% else %}border-slate-700 text-slate-300{% endif %}">{{ tab.label }}</a>
     {% endfor %}
   </div>
   <a href="/export.csv" class="shrink-0 text-sm text-slate-400 hover:text-accent border border-slate-700 rounded-lg px-3 py-1.5">Export CSV</a>
 </div>
 
-{% set suffix = (" in " ~ category) if category else "" %}
+{# Category chips: real links (work without JS), but base.html's script
+   switches them in place -- rows are only hidden, like the search. #}
+{% set chip_base = "px-2.5 py-1 rounded-full border whitespace-nowrap" %}
+{% set chip_on = "bg-slate-200 text-slate-950 border-slate-200" %}
+{% set chip_off = "border-slate-700 text-slate-400 hover:border-slate-500" %}
+<div id="category-chips" class="flex flex-wrap gap-1.5 text-xs mb-4" data-on="{{ chip_on }}" data-off="{{ chip_off }}">
+  {% for chip in category_chips %}
+  <a href="{{ chip.href }}" data-keep-q data-chip="{{ chip.value or '' }}"
+    class="{{ chip_base }} {{ chip_on if chip.active else chip_off }}">{{ chip.label }}
+    <span data-chip-count class="opacity-60">{{ chip.count }}</span></a>
+  {% endfor %}
+</div>
+
 <div class="flex items-center justify-between gap-2 mb-3">
-  <p id="match-count" data-suffix="{{ suffix }}" class="text-sm text-slate-400">
-    {{ match_count }} item{{ "s" if match_count != 1 else "" }}{% if q %} matching "{{ q }}"{% endif %}{{ suffix }}
+  <p id="match-count" class="text-sm text-slate-400">
+    {{ match_count }} item{{ "s" if match_count != 1 else "" }}{% if q %} matching "{{ q }}"{% endif %}{% if category %} in {{ category }}{% endif %}
   </p>
   <form method="get" action="/">
     {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
-    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    <input type="hidden" id="sort-category" name="category" value="{{ category or '' }}" {% if not category %}disabled{% endif %}>
     <input type="hidden" id="sort-q" name="q" value="{{ q }}">
     <select name="sort" onchange="this.form.submit()" aria-label="Sort"
       class="bg-card border border-slate-700 rounded-lg px-2 py-1.5 text-sm">
@@ -31,7 +43,7 @@
   </form>
 </div>
 
-<div id="items-list" class="space-y-2" data-csrf="{{ csrf_token }}" data-today="{{ today }}">
+<div id="items-list" class="space-y-2" data-csrf="{{ csrf_token }}" data-today="{{ today }}" data-category="{{ category or '' }}">
   {% for item in items %}
   {% include "_item_row.html" %}
   {% endfor %}

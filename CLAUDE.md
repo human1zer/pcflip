@@ -39,6 +39,11 @@ CDN, no build step). Deployed with Docker Compose.
   type; elsewhere Enter goes to `/?q=`. Every word must appear somewhere
   in `SEARCH_FIELDS` (title, serial, category, notes, seller, buyer, FINN
   IDs) or the status/label.
+- **Category chips** on `/`: one per category present in the current status
+  tab (+ "Uncategorized" for no category), with live counts of
+  search-matching rows. Clicking switches in place (no reload) and keeps
+  `?category=` in the URL, the status tabs and the sort form. Works
+  together with the status tab and the search.
 - **Parts panel** on Desktop PC / Laptop pages (`PC_CATEGORIES`): lists
   in-stock/listed non-PC items; "+ Add" posts to the existing
   `/items/{part}/consume`, "Remove" to `/consume/undo`, both with
@@ -64,6 +69,17 @@ not enough**:
 ```bash
 docker compose up -d --build
 docker compose logs -f
+```
+
+## Tests
+
+`tests/` (pytest + FastAPI TestClient) builds its own temp DB and auth
+config and never touches `./data`. The host has no venv, so run them in
+the app image with the working tree mounted:
+
+```bash
+docker run --rm -w /app -v "$PWD/app:/app/app:ro" -v "$PWD/tests:/app/tests:ro" pcflip-pcflip \
+  sh -c "pip -q install httpx==0.27.2 pytest && python -m pytest -q -p no:cacheprovider tests"
 ```
 
 ## Conventions
@@ -98,11 +114,11 @@ docker compose logs -f
   rewrites every column in `FORM_FIELDS` and sets missing ones to NULL.
   For single-field changes use `/quick`, which only touches
   `QUICK_FIELDS` that are actually sent.
-- The search rule exists twice — `items_list()` in `main.py` and
-  `filter()` in `base.html` — keep them in sync. The server renders
-  non-matching rows `hidden` rather than dropping them, so the in-page
-  filter can widen the search again; rows use `[data-search]` /
-  `data-href`.
+- The search + category rule exists twice — `items_list()` in `main.py`
+  and `filter()` in `base.html` — keep them in sync. The server renders
+  non-matching rows `hidden` rather than dropping them (category too, not
+  a SQL `WHERE`), so the in-page filter can widen the search again; rows
+  use `[data-search]` / `data-category` / `data-href`.
 - `[hidden]` needs the `display: none !important` rule in `base.html`;
   Tailwind's `.block`/`.flex` would otherwise win and show hidden rows.
 - `consumed` status is only set/cleared by the consume/undo routes (they

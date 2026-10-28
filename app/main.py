@@ -327,6 +327,8 @@ SORT_OPTIONS = {
 }
 PC_CATEGORIES = ("Desktop PC", "Laptop")
 STATUS_TABS = [(None, "All"), ("in_stock", "In stock"), ("listed", "Listed"), ("sold", "Sold"), ("consumed", "Consumed")]
+# Category chip (and ?category= value) for items with no category set.
+UNCATEGORIZED = "Uncategorized"
 
 
 # Columns the search box matches against, both server-side (the ?q= query)
@@ -353,9 +355,6 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
     if status:
         query += " AND status = ?"
         params.append(status)
-    if category:
-        query += " AND category = ?"
-        params.append(category)
 
     with database.get_conn() as conn:
         rows = conn.execute(query, params).fetchall()
@@ -373,13 +372,17 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
     # in-page filter can widen the search again as the query is edited. Every
     # whitespace-separated word must appear somewhere, same rule as the JS in
     # base.html, so "ddr4 16gb" finds an item with both words anywhere.
+    # The category chip works the same way (rows hidden, not dropped), so
+    # switching chips in the page needs no reload.
     words = (q or "").lower().split()
     items = [row_to_dict(r, cost_totals.get(r["id"], 0.0)) for r in rows]
     for item in items:
         item["cover_photo"] = covers.get(item["id"])
         item["search_text"] = _search_text(item)
         item["search_hidden"] = not all(w in item["search_text"] for w in words)
-    match_count = sum(not i["search_hidden"] for i in items)
+        item["chip_category"] = item["category"] or UNCATEGORIZED
+        item["category_hidden"] = bool(category) and item["chip_category"] != category
+    match_count = sum(not (i["search_hidden"] or i["category_hidden"]) for i in items)
 
     _, sort_key, sort_reverse = SORT_OPTIONS[sort]
     items.sort(key=sort_key, reverse=sort_reverse)
@@ -395,8 +398,23 @@ def items_list(request: Request, status: str = None, category: str = None, q: st
         for value, label in STATUS_TABS
     ]
 
+    # Chips for the categories present in this status tab, in dropdown order
+    # (plus the active one even if it's empty here). Counts are of
+    # search-matching rows; base.html's filter() keeps them live as you type.
+    present = {i["chip_category"] for i in items} | ({category} if category else set())
+    order = CATEGORIES + [UNCATEGORIZED]
+    chip_values = sorted(present, key=lambda c: (order.index(c) if c in order else len(CATEGORIES), c))
+    category_chips = [{"value": None, "label": "All", "count": sum(not i["search_hidden"] for i in items)}] + [
+        {"value": c, "label": c, "count": sum(not i["search_hidden"] and i["chip_category"] == c for i in items)}
+        for c in chip_values
+    ]
+    for chip in category_chips:
+        chip["href"] = f"/{qs(category=chip['value'])}"
+        chip["active"] = (category or None) == chip["value"]
+
     return render(request, "items_list.html", items=items, status=status, category=category, q=q or "",
                   sort=sort, sort_options=SORT_OPTIONS, status_tabs=status_tabs, qs=qs, stats=stats,
+                  category_chips=category_chips,
                   match_count=match_count, today=date.today().isoformat())
 
 
@@ -769,6 +787,7 @@ async def item_quick_update(request: Request, item_id: int):
         stats = get_stats(conn)
     item["cover_photo"] = cover["thumb_filename"] if cover else None
     item["search_text"] = _search_text(item)
+    item["chip_category"] = item["category"] or UNCATEGORIZED
 
     return JSONResponse({
         "row": _render_partial("_item_row.html", item=item),
